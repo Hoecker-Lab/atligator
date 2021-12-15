@@ -11,7 +11,7 @@ Example:
 :date: 2018-03-22
 """
 
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, FileType
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from operator import itemgetter
 from typing import List
 
@@ -25,11 +25,12 @@ from atligator.pdb_util import get_chain_by_id, get_residues_within_radius, is_a
 # Main script. It identifies the chain of the PDB filed specified in the argument list, finds interacting residues of
 # non-ligand chains that lie within the specified radius, collects data, and prints them out in a sorted way.
 if __name__ == "__main__":
+    # noinspection PyTypeChecker
     ap = ArgumentParser(description="processes a specified chain of a PDB file and prints out all residues of "
                                     "different chains that lie within a given interaction radius.",
                         formatter_class=ArgumentDefaultsHelpFormatter,
                         epilog="the output format is: [chain_id] [residue-type][residue_id]")
-    ap.add_argument("pdb_file", type=FileType('r'), help="the PDB file to analyze.")
+    ap.add_argument("pdb_file", type=str, help="the PDB file to analyze.")
     ap.add_argument("chain", type=str, help="the relevant chain of the PDB file.")
     ap.add_argument("-r", "--ir_default", type=float, default=4.0,
                     help="pairs of residue atoms within this radius are considered as interacting.")
@@ -47,7 +48,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     parser = PDBParser(QUIET=True)
     residues = set()
-    structure: Structure = parser.get_structure(args.pdb_file.name, args.pdb_file.name)
+    structure: Structure = parser.get_structure(args.pdb_file, args.pdb_file)
     for model in structure:
         ligand: Chain = get_chain_by_id(model, args.chain)
         for ligres in ligand.get_residues():

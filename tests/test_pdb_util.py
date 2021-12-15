@@ -3,11 +3,13 @@ from itertools import combinations_with_replacement, product
 
 from Bio import PDB
 from Bio.PDB.Chain import Chain
+from Bio.PDB.Model import Model
 from Bio.SeqUtils import seq1
 
 from atligator.pdb_util import canonical_amino_acids, canonical_amino_acids_short, aa_3to1_conv, ABC, \
     get_interaction_types, get_chain_by_id, find_ligands, is_canonical_amino_acid, is_amino_acid_residue, \
-    has_amino_acid_atoms, get_path, get_nonbinder_residues_within_radius
+    has_amino_acid_atoms, get_path, get_nonbinder_residues_within_radius, NoResidueInDistance, NoBinderAtoms, \
+    NoLigandAtoms
 
 
 class MyTestCase(unittest.TestCase):
@@ -196,30 +198,40 @@ class MyTestCase(unittest.TestCase):
         # first setup parameter is segmentation (only nonbinder residues in a line of at least 3 res are returned)
         # the second one is if hydrogen atoms are also included (interactions are found in short distances)
         # The third parameter is the maximum radius around the binder chain to look for residues
-        setups = {(0, 1, 1.8): 0,  # dict values are the expected number of residues to find
-                  (0, 1, 1.9): 3,
-                  (0, 1, 2.0): 4,
-                  (0, 1, 2.3): 5,
-                  (1, 1, 1.9): 0,
-                  (1, 1, 2.0): 3,
-                  (1, 1, 2.3): 5,
-                  (0, 0, 2.7): 0,
-                  (0, 0, 2.8): 3,
-                  (0, 0, 2.9): 5,
-                  (0, 0, 5.0): 5,
-                  (1, 0, 2.8): 0,
-                  (1, 0, 2.9): 5,
-                  (1, 0, 5.0): 5,
+        setups = {(0, 1, 1.8, 0, 0): 0,  # dict values are the expected number of residues to find
+                  (0, 1, 1.9, 0, 0): 3,
+                  (0, 1, 2.0, 0, 0): 4,
+                  (0, 1, 2.3, 0, 0): 5,
+                  (1, 1, 1.9, 0, 0): 0,
+                  (1, 1, 2.0, 0, 0): 3,
+                  (1, 1, 2.3, 0, 0): 5,
+                  (0, 0, 2.7, 0, 0): 0,
+                  (0, 0, 2.8, 0, 0): 3,
+                  (0, 0, 2.9, 0, 0): 5,
+                  (0, 0, 5.0, 0, 0): 5,
+                  (1, 0, 2.8, 0, 0): 0,
+                  (1, 0, 2.9, 0, 0): 5,
+                  (1, 0, 5.0, 0, 0): 5,
+                  (0, 1, 2.0, 1, 0): "no binder",
+                  (0, 1, 2.0, 0, 1): "no ligand",
                   }
         for setup, exp_result in setups.items():
-            segmentation, incl_hydrogens, radius = setup
-            actual_result = get_nonbinder_residues_within_radius(self.struc[0],
-                                                                 binder_chain=self.struc[0][self.binder_chain],
-                                                                 ir_max=radius,
-                                                                 ligand_min_len=3,
-                                                                 segmentation=bool(segmentation),
-                                                                 include_hydrogens=bool(incl_hydrogens))
-            self.assertEqual(exp_result, len(list(actual_result)))
+            segmentation, incl_hydrogens, radius, empty_binder, empty_ligand = setup
+            actual_result = get_nonbinder_residues_within_radius(
+                model=self.struc[0] if not empty_ligand else Model(id=0),
+                binder_chain=self.struc[0][self.binder_chain] if not empty_binder else Chain(id="A"),
+                ir_max=radius,
+                ligand_min_len=3,
+                segmentation=bool(segmentation),
+                include_hydrogens=bool(incl_hydrogens))
+            try:
+                self.assertEqual(exp_result, len(list(actual_result)))
+            except NoResidueInDistance:
+                self.assertEqual(exp_result, 0)
+            except NoBinderAtoms:
+                self.assertEqual(exp_result, "no binder")
+            except NoLigandAtoms:
+                self.assertEqual(exp_result, "no ligand")
 
 
 if __name__ == '__main__':

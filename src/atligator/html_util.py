@@ -8,6 +8,7 @@ pockets obtained by the pocket miner.
 :date: 2018-06-06
 """
 import datetime
+from pathlib import Path
 from typing import List, Dict
 
 from Bio.SeqUtils import seq1
@@ -44,7 +45,7 @@ def generate_html_pocket_index(output_folder: str, atlas: Atlas, pockets: Dict[s
     html.append('    </ul>')
     html.append('</body>')
     html.append('</html>')
-    with open(f'{output_folder}/index.html', 'w') as fo:
+    with open(Path(output_folder) / 'index.html', 'w') as fo:
         for line in html:
             fo.write(line + '\n')
 
@@ -129,6 +130,6 @@ def generate_html_pocket_description(output_folder: str, ligand_restype: str, po
     html.append('    <p><a href="index.html">back to index</a></p>')
     html.append('</body>')
     html.append('</html>')
-    with open(f'{output_folder}/{ligand_restype}.html', 'w') as fo:
+    with open(Path(output_folder) / f"{ligand_restype}.html", 'w') as fo:
         for line in html:
             fo.write(line + '\n')

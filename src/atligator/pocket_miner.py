@@ -4,12 +4,13 @@ residue types based on atlas data. It is based on association rule mining and fr
 :Author: Felix Schwaegerl <felix.schwaegerl@uni-bayreuth.de>
 :date: 2018-04-20
 """
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import copy
 from math import sqrt
 from random import sample, choice
-from typing import List, Dict, Tuple, Set, Callable
+from typing import List, Dict, Tuple, Set, Callable, TextIO, Union, Any
 
 from Bio.PDB import Vector
 from Bio.PDB.Chain import Chain
@@ -18,7 +19,7 @@ from Bio.PDB.Structure import Structure
 from Bio.SeqUtils import seq1
 from scipy.optimize import linear_sum_assignment
 
-from atligator.atlas import Atlas, AtlasDatapoint
+from atligator.atlas import Atlas, AtlasDatapoint, AtlasEncoder
 from atligator.pdb_util import canonical_amino_acids, find_scop_i_from_pdbs
 
 
@@ -238,6 +239,23 @@ def distance(res1: AtlasDatapoint, res2: AtlasDatapoint,
 class PocketCluster:
     """A cluster of atlas residues that represents a part of a pocket."""
 
+    @classmethod
+    def from_json(cls, cluster: Dict[str, Any]):
+        """
+        Return a PocketCluster from a json representation of one.
+        :param cluster: json representation of a PocketCluster or open file handle containing it
+        :return: PocketCluster based on json
+        """
+        centroid = AtlasDatapoint.from_json(cluster['centroid'])
+        new_cluster = PocketCluster(ligand_restype=cluster['ligand_restype'],
+                                    binder_restype=cluster['binder_restype'],
+                                    initial_centroid=centroid)
+        new_cluster.variance = cluster['variance']
+        new_cluster.has_changed = cluster['has_changed']
+        new_cluster.members = [AtlasDatapoint.from_json(mem) for mem in cluster['members']]
+        new_cluster.future_members = [AtlasDatapoint.from_json(fmem) for fmem in cluster['future_members']]
+        return new_cluster
+
     def __init__(self, ligand_restype: str, binder_restype: str, initial_centroid: AtlasDatapoint):
         """ Creates a new cluster.
         :param ligand_restype: same as for all clustered atlas residues
@@ -364,6 +382,29 @@ class PocketCluster:
 class Pocket:
     """A pocket is a collection of pocket clusters that have emerged from a given itemset."""
 
+    @classmethod
+    def from_json(cls, pocket):
+        """
+        Return a Pocket from a json representation of one.
+        :param pocket: json representation of a Pocket
+        :return: Pocket based on json
+        """
+        pocket_itemset = PocketItemset(items=pocket['itemset'])
+        pocket_clusters = []
+        for cluster in pocket['clusters']:
+            pocket_clusters.append(PocketCluster.from_json(cluster))
+        return Pocket(restype=pocket['restype'],
+                      support=pocket['support'],
+                      itemset=pocket_itemset,
+                      clusters=pocket_clusters)
+
+    def to_json(self):
+        """
+        Return a json representation of this Pocket.
+        :return: json string based on Pocket
+        """
+        return json.dumps(self, cls=PocketsEncoder)
+
     def __init__(self, restype: str, itemset: PocketItemset, support: float, clusters: List[PocketCluster]):
         """
         :param restype: the ligand residue type represented by this pocket
@@ -376,6 +417,9 @@ class Pocket:
         self.itemset = itemset
         self.support = support
         self.clusters = clusters
+
+    def __repr__(self):
+        return f"<Pocket {self.restype}: {self.itemset}>"
 
     def __len__(self) -> int:
         return self.n_ligand_origins()
@@ -396,7 +440,7 @@ class Pocket:
                 lig_ors.add(m.ligand_origin)
         return len(lig_ors)
 
-    def origins(self, scop_db: str = "/agh/db/scop/2.07/dir.cla.scope.2.07-stable.txt",
+    def origins(self, scop_db: str = None,
                 stringify: bool = True, scop_only: bool = True) -> Dict or str or None:
         """
         Specfies origins of data points in this pocket (in scope classifiers)
@@ -623,6 +667,46 @@ class Pocket:
         return struc
 
 
+def pockets_to_json_file(pockets: Dict[str, List[Pocket]], fp):
+    """
+    Dumps the json represenation of Pockets to an open file handle
+    :param pockets: Dict with Pockets to convert to json
+    :param fp: open file handle to write json into
+    :return: None
+    """
+    return json.dump(pockets, fp=fp, cls=PocketsEncoder)
+
+
+def pockets_to_json(pockets: Dict[str, List[Pocket]]):
+    """
+    Returns the json represenation of Pockets
+    :param pockets: Dict with Pockets to convert to json
+    :return: json represenation of Pockets
+    """
+    return json.dumps(pockets, cls=PocketsEncoder)
+
+
+def json_to_pockets(json_str_or_file: Union[str, TextIO]):
+    """
+    Return a Pockets dict from a json representation of one.
+    :param json_str_or_file: json representation of Pockets or open file handle containing it
+    :return: dictionary with Pockets
+    """
+
+    def convert(pockets: Dict[str, List[Dict]]):
+        return_pockets = {}
+        for ligand_aa, ligand_pockets in pockets.items():
+            return_pockets[ligand_aa] = []
+            for pocket in ligand_pockets:
+                return_pockets[ligand_aa].append(Pocket.from_json(pocket))
+        return return_pockets
+
+    if isinstance(json_str_or_file, str):
+        return convert(json.loads(json_str_or_file))
+    else:
+        return convert(json.load(json_str_or_file))
+
+
 def clusterize_pocket_atlas(atlas: Atlas, itemset: PocketItemset, support: float, variance_threshold: float,
                             distance_factor: float, orient_factor: float, secor_factor: float,
                             one_per_cluster: bool = True, more_than_one_ok: bool = True) -> Pocket:
@@ -741,7 +825,7 @@ def clusterize_pocket_atlas(atlas: Atlas, itemset: PocketItemset, support: float
     return Pocket(atlas.datapoints[0].ligand_restype, itemset, support, clusters)
 
 
-def mine_pockets(atlas: Atlas, max_atlases_per_ligand_restype: int = 5, min_itemset_cardinality: int = 2,
+def mine_pockets(atlas: Atlas, max_pockets_per_ligand_restype: int = 5, min_itemset_cardinality: int = 2,
                  confidence_threshold: float = 0.05, support_threshold: float = 0.05, variance_threshold: float = 5.0,
                  distance_factor: float = 1.0, orient_factor: float = 2.0, secor_factor: float = 2.0,
                  n_workers: int = -1, itemset_observer: Callable[[int, int], None] = None,
@@ -751,7 +835,7 @@ def mine_pockets(atlas: Atlas, max_atlases_per_ligand_restype: int = 5, min_item
     specifically for every residue type, and applies clustering in order to identify pockets. These pockets are then
     returned, grouped by ligand residue type
     :param atlas: the collection of datapoints taken as basis for the analysis
-    :param max_atlases_per_ligand_restype: the result will contain no more than this number of atlases per ligand
+    :param max_pockets_per_ligand_restype: the result will contain no more than this number of pockets per ligand
     residue type
     :param min_itemset_cardinality: frequent itemsets must have at least this cardinality. I.e., the resulting pockets
     will consists of at least this number of residues
@@ -803,7 +887,7 @@ def mine_pockets(atlas: Atlas, max_atlases_per_ligand_restype: int = 5, min_item
                 dataset_itemsets.append(itemset)
                 supports.append(support)
                 items_added += 1
-                if items_added >= max_atlases_per_ligand_restype:
+                if items_added >= max_pockets_per_ligand_restype:
                     break
         processed += 1
         if itemset_observer is not None:
@@ -824,3 +908,28 @@ def mine_pockets(atlas: Atlas, max_atlases_per_ligand_restype: int = 5, min_item
             result[pocket.restype] = []
         result[pocket.restype].append(pocket)
     return result
+
+
+class PocketsEncoder(AtlasEncoder):
+    """
+    Enables the json Encoder to also encode an PocketCluster, Pocket and PocketItemset
+    """
+
+    def default(self, obj):
+        if isinstance(obj, PocketCluster):
+            return {'ligand_restype': obj.ligand_restype,
+                    'binder_restype': obj.binder_restype,
+                    'members': obj.members,
+                    'centroid': obj.centroid,
+                    'variance': obj.variance,
+                    'future_members': obj.future_members,
+                    'has_changed': obj.has_changed}
+        if isinstance(obj, PocketItemset):
+            return {'items': obj.items}
+        if isinstance(obj, Pocket):
+            return {'restype': obj.restype,
+                    'itemset': obj.itemset,
+                    'support': obj.support,
+                    'clusters': obj.clusters}
+        else:
+            return AtlasEncoder.default(self, obj)

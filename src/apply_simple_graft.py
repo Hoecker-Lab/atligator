@@ -15,10 +15,11 @@ Example:
 """
 
 import pickle
-from Bio.PDB import PDBParser, Structure, PDBIO
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, FileType
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from copy import deepcopy
 from typing import Dict, List
+
+from Bio.PDB import PDBParser, Structure, PDBIO
 
 from atligator.acomplex import read_complex_descriptor
 from atligator.grafting import simple_graft
@@ -27,20 +28,21 @@ from atligator.pocket_miner import Pocket
 
 # Main script. Parses the arguments and calls the simple graft algorithm from the library.
 if __name__ == "__main__":
+    # noinspection PyTypeChecker
     ap = ArgumentParser(description="analyzes an atlas in terms of frequent pocket itemsets and splits the information"
                                     " into disjoint atlases for every pocket identified.",
                         formatter_class=ArgumentDefaultsHelpFormatter)
-    ap.add_argument("scaffold", type=FileType('r'),
+    ap.add_argument("scaffold", type=str,
                     help="a PDB scaffold file containing the binder and ligand coordinates")
-    ap.add_argument("descriptor", type=FileType('r'),
+    ap.add_argument("descriptor", type=str,
                     help="annotates the scaffold file with information about ligand residue types and wildcard residues"
                          " of the binder. The ligand section may contain the placeholders 'XXX' and 'YYY', which are"
                          " replaced by every of the 20 amino acids in a batch run (see options -x and -y)")
-    ap.add_argument("pockets", type=FileType('r'),
+    ap.add_argument("pockets", type=str,
                     help="a dumped pockets file created by the pocket miner. These pockets will be taken into account "
                          "for grafting.")
     ap.add_argument("-d", "--distance_factor", type=float, default=2.0,
-                    help="weight factor for distance coefficient of the distance function used for identifying"
+                    help="weight factor for distance coefficient of the distance function used for identifying " \
                          "graftable pockets. [1/Angstrom]")
     ap.add_argument("-r", "--orient_factor", type=float, default=1.0,
                     help="weight factor for the primary orientation coefficient (C_alpha->C_beta) of the distance "
@@ -61,8 +63,8 @@ if __name__ == "__main__":
                          " are set, this name must include XXX and/or YYY, which are replaced by the concrete residue"
                          " types in the output")
     args = ap.parse_args()
-    descriptor = read_complex_descriptor(args.descriptor.name)
-    with open(args.pockets.name, 'rb') as fo:
+    descriptor = read_complex_descriptor(args.descriptor)
+    with open(args.pockets, 'rb') as fo:
         pockets: Dict[str, List[Pocket]] = pickle.load(fo)
     for aaX in (canonical_amino_acids if args.XXX else ['XXX']):
         descriptor1 = deepcopy(descriptor)
@@ -78,7 +80,7 @@ if __name__ == "__main__":
                     (chain_id, residue_id, aaY if new_residue_type == 'YYY' else new_residue_type)
                     for (chain_id, residue_id, new_residue_type) in descriptor2.ligand_info]
             parser = PDBParser(QUIET=True)
-            scaffold_structure: Structure = parser.get_structure(args.scaffold.name, args.scaffold.name)
+            scaffold_structure: Structure = parser.get_structure(args.scaffold, args.scaffold)
             simple_graft(scaffold_structure, descriptor2, pockets,
                          penalty_threshold=args.penalty_threshold,
                          distance_factor=args.distance_factor,

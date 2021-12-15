@@ -156,7 +156,7 @@ def visualize_atlas(atlas: Atlas, method: str = "plotly", **kwargs) -> None:
 
 
 def visualize_atlas_plotly(atlas: Atlas = None, ligand_restype: Union[str, None] = None,
-                           binder_restype: Union[str, None] = None, **_) -> None:
+                           binder_restype: Union[str, None] = None, dimensions: float = 10.0, **_) -> None:
     """Shows a 3d plotly plot with in the web broswer that contains both the specified residue ligand
     and the atlas datapoints associated with the corresponding residue types. All residues are shown as
     Ca Cb markers with the Cb being smaller than Ca.
@@ -165,6 +165,7 @@ def visualize_atlas_plotly(atlas: Atlas = None, ligand_restype: Union[str, None]
     :param ligand_restype: binder residues interacting with this ligand residue types will be displayed. If unset, no
     filtering is applied.
     :param binder_restype: binder residues of this type will be displayed. If unset, no filtering is applied.
+    :param dimensions: max negative and positive coordinates to display, in Angstrom
     :param _: to prevent failure if matplotlib parameters are given.
     :return: None
     """
@@ -248,11 +249,19 @@ def visualize_atlas_plotly(atlas: Atlas = None, ligand_restype: Union[str, None]
                                       line=dict(width=0)),
                           selector=dict(name=aa))
 
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(nticks=10, range=[-dimensions, dimensions], ),
+            yaxis=dict(nticks=10, range=[-dimensions, dimensions], ),
+            zaxis=dict(nticks=10, range=[-dimensions, dimensions], ),
+            aspectmode="cube", ))
+
     fig.show()
 
 
-def visualize_atlas_matplotlib(atlas: Atlas, ligand_restype: str or None, binder_restype: str or None,
-                               title: str = None, dimensions: float = 10.0, draw_secor: bool = False) -> None:
+def visualize_atlas_matplotlib(atlas: Atlas, ligand_restype: Union[str, None] = None,
+                               binder_restype: Union[str, None] = None, title: str = None, dimensions: float = 10.0,
+                               draw_secor: bool = False) -> None:
     """Shows a 3d quiver plot that contains both the specified residue ligand (including backbone) and the atlas
     datapoints associated with the corresponding ligand residue types.
     :param atlas: the atlas to visualize
@@ -268,7 +277,12 @@ def visualize_atlas_matplotlib(atlas: Atlas, ligand_restype: str or None, binder
             title = 'Atlas'
         else:
             title = ligand_restype
-    filtered_atlas = atlas.filter(ligand_restype, binder_restype)
+
+    # Filter atlas, if filtering for ligand or binder residue is desired.
+    if ligand_restype is not None or binder_restype is not None:
+        atlas = atlas.filter(ligand_restype=ligand_restype, binder_restype=binder_restype)
+    if ligand_restype is None:
+        ligand_restype = "LIG"
     # plot the data as matplotlib 3d quiver
     fig = plt.figure()
     fig.suptitle(title)
@@ -283,7 +297,7 @@ def visualize_atlas_matplotlib(atlas: Atlas, ligand_restype: str or None, binder
     # process binder residues
     for binrestype in color_map:
         # for each potential interacting binder residue, paint the quivers in individual colors.
-        relevant_datapoints = [d for d in filtered_atlas.datapoints if d.binder_restype == binrestype]
+        relevant_datapoints = [d for d in atlas.datapoints if d.binder_restype == binrestype]
         col = color_map[binrestype]
         x: List[float] = []
         y: List[float] = []
@@ -457,7 +471,10 @@ def visualize_atlas_stats_plotly(atlas: Atlas, ligand_per_binder: bool = False, 
     param atlas: The atlas to take the data from
     param invert: if True, the plot maps ligand (x axis) to binder (y axis), else vice versa.
     """
+    # TODO alternative amino acids
     stats = atlas.get_stats(ligand_per_binder=ligand_per_binder)
+    stats = dict(sorted(Atlas.fill_stats(stats).items()))
+
     df = pd.DataFrame.from_dict(stats)
     df = df.transpose()
     cmap = get_color_map(color_mode)
@@ -483,6 +500,7 @@ def visualize_atlas_stats_matplotlib(atlas: Atlas, ligand_per_binder: bool = Fal
     """
     # TODO viualize alternative aas too...
     stats = atlas.get_stats(ligand_per_binder)
+    stats = dict(sorted(Atlas.fill_stats(stats).items()))
     max_height = max([sum([val for val in line.values()]) for line in stats.values()])
     for ind, ligres in enumerate(canonical_amino_acids):
         if ligres not in stats:
@@ -499,9 +517,22 @@ def visualize_atlas_stats_matplotlib(atlas: Atlas, ligand_per_binder: bool = Fal
         ligand_col = get_color(ligres, color_mode)
         plt.bar([ind], 10.0, 0.9, color=ligand_col, bottom=[-20.0])
     plt.xticks(range(0, 20), canonical_amino_acids, rotation=60)
-    plt.yticks([-15] + list(range(0, 101, 10)),
-               ["Binder" if ligand_per_binder else "Ligand"] +
-               list([f"{i}" for i in range(0, max_height, int(max_height / 10))]))
+    if max_height >= 100:
+        plt.yticks([-15] + list(range(0, 101, 10)),
+                   ["Binder" if ligand_per_binder else "Ligand"] +
+                   list("{:.0f}".format(i / 10) for i in range(0, max_height * 11, max_height)))
+    elif max_height:
+        if max_height >= 50:
+            divisor = 10
+        elif max_height >= 15:
+            divisor = 5
+        else:
+            divisor = 1
+        # the next multiple of divisor greater than max_heigth
+        next_multiple = int(max_height / divisor) + 1
+        plt.yticks([-15] + list(round(divisor * 100 / max_height * i) for i in range(0, next_multiple + 1)),
+                   ["Binder" if ligand_per_binder else "Ligand"] +
+                   list(str(i) for i in range(0, next_multiple * divisor + 1, divisor)))
     plt.show()
 
 
@@ -512,7 +543,7 @@ def visualize_pocket_atlas(pocket: Pocket, method: str = "plotly", **kwargs):
         :param pocket: the pocket to visualize
         :param method: Either "plotly" or "matplotlib". If not plotly matplotlib is used.
     """
-    return visualize_atlas(atlas=pocket.to_atlas(), method=method, **kwargs)
+    return visualize_atlas(atlas=pocket.to_atlas(), method=method, ligand_restype=pocket.restype, **kwargs)
 
 
 class DatapointNotFound(Exception):
@@ -607,6 +638,31 @@ def visualize_single_pocket(pocket: Pocket, datapoint: AtlasDatapoint, color_by_
     restypes = []
     size = []
     bonds_list = []
+    text = []
+
+    # Set ligand atoms
+    # Atom bubbles
+    ligand_atoms: List[Tuple[str, Vector, str]] = [(name, atom, dps[0].ligand_origin)
+                                                   for name, atom in dps[0].ligand_atoms.items()]
+    ligand_restype = dps[0].ligand_restype
+    for atom_name, atom_vector, origin in ligand_atoms:
+        if not (color_by_element and atom_name[0] in hatom_names):
+            x.append(atom_vector[0])
+            y.append(atom_vector[1])
+            z.append(atom_vector[2])
+            restypes.append(ligand_restype)
+            size.append(10)
+            text.append(origin + "/" + atom_name)
+        else:
+            hatom_atoms[atom_name[0]]['x'].append(atom_vector[0])
+            hatom_atoms[atom_name[0]]['y'].append(atom_vector[1])
+            hatom_atoms[atom_name[0]]['z'].append(atom_vector[2])
+            hatom_atoms[atom_name[0]]['text'].append(origin + "/" + atom_name)
+
+    for ligand_line in get_best_connections_for_dp(ligand_atoms, restype_=ligand_restype,
+                                                   trace_name=ligand_restype + " ligand bond",
+                                                   color_=get_color(ligand_restype)):
+        bonds_list.append(ligand_line)
 
     # For every datapoint save coords, restype and size (Ca and Cb)
     for dp in dps:
@@ -622,10 +678,12 @@ def visualize_single_pocket(pocket: Pocket, datapoint: AtlasDatapoint, color_by_
                 z.append(atom_vector[2])
                 restypes.append(dp.binder_restype)
                 size.append(8)
+                text.append(dp.binder_origin + "/" + atom_name)
             else:
                 hatom_atoms[atom_name[0]]['x'].append(atom_vector[0])
                 hatom_atoms[atom_name[0]]['y'].append(atom_vector[1])
                 hatom_atoms[atom_name[0]]['z'].append(atom_vector[2])
+                hatom_atoms[atom_name[0]]['text'].append(dp.binder_origin + "/" + atom_name)
 
         # define connections between residue atoms for plotting of covalent bonds.
         for binder_line in get_best_connections_for_dp(bin_atoms, restype_=dp.binder_restype,
@@ -640,6 +698,7 @@ def visualize_single_pocket(pocket: Pocket, datapoint: AtlasDatapoint, color_by_
         "z": z,
         "restype": restypes,
         "size": size,
+        "text": text,
     })
 
     # concatenate color dictionaries to address Ca (full color) and Cb (light color)
@@ -647,18 +706,25 @@ def visualize_single_pocket(pocket: Pocket, datapoint: AtlasDatapoint, color_by_
     color_map_full = {**color_map, **color_map_light_cb}
 
     # Define figure and include all atoms (if color_by_element: only carbon atoms) as markers
-    fig = px.scatter_3d(df, x='x', y='y', z='z',
+    fig = px.scatter_3d(df, x='x', y='y', z='z', hover_name='text',
                         color='restype', color_discrete_map=color_map_full)
 
     # Special heavy atom coloring: O, N, S, P as markers
     if color_by_element:
         for atoms_name, atoms in hatom_atoms.items():
             fig.add_trace(go.Scatter3d(x=atoms['x'], y=atoms['y'], z=atoms['z'], name=atoms_name,
-                                       mode='markers', showlegend=False,
+                                       hovertemplate="<b>%{hovertext}</b><br><br>x=%{x}<br>y=%{y}<br>z=%{z}",
+                                       mode='markers', showlegend=False, hovertext=atoms['text'],
                                        marker={'line': {'width': 20, 'color': hatoms_colours[atoms_name]}}))
 
     # Define bond lines
     for bond in bonds_list:
         fig.add_trace(go.Scatter3d(x=bond['x'], y=bond['y'], z=bond['z'], name=bond['name'], mode='lines',
                                    showlegend=False, line=bond['line'], hoverinfo='skip'))
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[-15, 15], ),
+            yaxis=dict(range=[-15, 15], ),
+            zaxis=dict(range=[-15, 15], ),
+            aspectmode="cube", ))
     fig.show()

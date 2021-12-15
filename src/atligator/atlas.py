@@ -6,10 +6,12 @@ the extraction of atlas data from PDB files.
 :Author: Felix Schwaegerl <felix.schwaegerl@uni-bayreuth.de>
 :date: 2018-02-28
 """
+import json
+import logging
 import os
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Iterator, Dict, Callable
+from typing import List, Iterator, Dict, Callable, Any, Union, TextIO
 
 # import h5py
 from Bio.PDB.Atom import Atom
@@ -23,10 +25,26 @@ from Bio.PDB.vectors import Vector
 from atligator.pdb_util import find_ligands, get_icoor_from_pdb_residue, is_amino_acid_residue, get_cbeta_position, \
     get_residues_within_radius, get_path, canonical_amino_acids
 
+logger = logging.getLogger(__name__)
+
 
 class AtlasDatapoint:
     """An atlas datapoint emerges from an interaction detected between two residues part of a ligand and binder chain,
     respectively."""
+
+    @classmethod
+    def from_json(cls, json_datapoint: Dict[str, Any]):
+        """
+        Return an AtlasDatapoint from a json representation of one.
+        :param json_datapoint: json representation of an AtlasDatapoint
+        :return: AtlasDatapoint based on json
+        """
+        return AtlasDatapoint(ligand_restype=json_datapoint['ligand_restype'],
+                              binder_restype=json_datapoint['binder_restype'],
+                              ligand_origin=json_datapoint['ligand_origin'],
+                              binder_origin=json_datapoint['binder_origin'],
+                              ligand_atoms=get_atoms_from_json(json_datapoint['ligand_atoms']),
+                              binder_atoms=get_atoms_from_json(json_datapoint['binder_atoms']))
 
     def __init__(self, ligand_restype: str, binder_restype: str, ligand_origin: str or None, binder_origin: str or None,
                  ligand_atoms: Dict[str, Vector], binder_atoms: Dict[str, Vector]):
@@ -105,6 +123,53 @@ class AtlasDatapoint:
 
 class Atlas:
     """an atlas is a collection of atlas residues."""
+
+    @classmethod
+    def fill_stats(cls, stats):
+        def full():
+            return {k: 0 for k in canonical_amino_acids}
+
+        full_stats = defaultdict(full, stats)
+        for aa in canonical_amino_acids:
+            full_stats[aa] = defaultdict(int, full_stats[aa])
+            for aa2 in canonical_amino_acids:
+                full_stats[aa][aa2] = full_stats[aa][aa2]
+
+        return full_stats
+
+    @classmethod
+    def from_json(cls, json_str_or_file):
+        """
+        Return an Atlas from a json representation of one.
+        :param json_str_or_file: json representation of an AtlasDatapoint or open file handle containing it
+        :return: Atlas based on json
+        """
+
+        def convert(raw_atlas):
+            datapoints = []
+            for datapoint in raw_atlas['datapoints']:
+                datapoints.append(AtlasDatapoint.from_json(datapoint))
+            return Atlas(datapoints=datapoints, features=raw_atlas['features'])
+
+        if isinstance(json_str_or_file, str):
+            return convert(json.loads(json_str_or_file))
+        else:
+            return convert(json.load(json_str_or_file))
+
+    def to_json(self):
+        """
+        Returns the json represenation of an Atlas
+        :return: json represenation of an Atlas
+        """
+        return json.dumps(self, cls=AtlasEncoder)
+
+    def to_json_file(self, fp):
+        """
+        Dumps the json represenation of an Atlas to an open file handle
+        :param fp: open file handle to write json into
+        :return: None
+        """
+        return json.dump(self, fp=fp, cls=AtlasEncoder)
 
     def __init__(self, datapoints: List[AtlasDatapoint], features: Dict = None):
         """creates a new atlas instance, which is represented explicitly by its datapoints.
@@ -261,7 +326,7 @@ def find_datapoints(model: Model, ir_default: float = 4.0, ir_hbond: float = 6.0
 
 
 def generate_atlas(filenames: List[str], ir_default: float = 4.0, ir_hbond: float = 6.0, ir_aromatic: float = 6.0,
-                   ir_ionic: float = 8.0, minlen: int = 4, maxlen: int = 20, n_workers: int = -1,
+                   ir_ionic: float = 8.0, min_ligand_len: int = 3, max_ligand_len: int = 20, n_workers: int = -1,
                    include_hydrogens: bool = False, include_alternative_models: bool = False,
                    observer: Callable[[str], None] = None, alternative_lig_aa: str = None,
                    restrict_to_alternative: bool = True, allow_self_interactions: bool = False,
@@ -273,8 +338,8 @@ def generate_atlas(filenames: List[str], ir_default: float = 4.0, ir_hbond: floa
     :param ir_hbond: interaction radius for hydrogen bond interactions in Angstrom
     :param ir_aromatic: interaction radius for aromatic interactions in Angstrom
     :param ir_ionic: interaction radius for ionic interactions in Angstrom
-    :param minlen: minimum chain length. see find_datapoints
-    :param maxlen: maximum chain length. see find_datapoints
+    :param min_ligand_len: minimum chain length. see find_datapoints
+    :param max_ligand_len: maximum chain length. see find_datapoints
     :param n_workers: size of the threadpool, or -1 if it shall equal the number of physical CPU cores
     :param include_hydrogens: whether hydrogen atoms are to be considered. see find_datapoints
     :param include_alternative_models: whether to include data from models different from the first model of the
@@ -285,6 +350,7 @@ def generate_atlas(filenames: List[str], ir_default: float = 4.0, ir_hbond: floa
     :param restrict_to_alternative: If True: If alternative Ligand amino acid is given restrict to this type.
     :param allow_self_interactions: If True interactions within one chain are taken into account (Slows down
     calculation heavily!!)
+    :param skip_bb_atoms: If True, interactions with the ligand backbone atoms are not considered.
     :return: The atlas created from the PDB files based on the given parameters
     """
     if n_workers == -1:
@@ -301,7 +367,8 @@ def generate_atlas(filenames: List[str], ir_default: float = 4.0, ir_hbond: floa
         _datapoints: List[AtlasDatapoint] = []
         for _m in _structure:
             _datapoints.extend(find_datapoints(model=_m, ir_default=ir_default, ir_hbond=ir_hbond,
-                                               ir_aromatic=ir_aromatic, ir_ionic=ir_ionic, minlen=minlen, maxlen=maxlen,
+                                               ir_aromatic=ir_aromatic, ir_ionic=ir_ionic, minlen=min_ligand_len,
+                                               maxlen=max_ligand_len,
                                                include_hydrogens=include_hydrogens,
                                                alternative_lig_aa=alternative_lig_aa,
                                                restrict_to_alternative=restrict_to_alternative,
@@ -315,7 +382,7 @@ def generate_atlas(filenames: List[str], ir_default: float = 4.0, ir_hbond: floa
         return _datapoints
 
     atlas = Atlas([], features={"ir_default": ir_default, "ir_hbond": ir_hbond, "ir_aromatic": ir_aromatic,
-                                "ir_ionic": ir_ionic, "minlen": minlen, "maxlen": maxlen,
+                                "ir_ionic": ir_ionic, "minlen": min_ligand_len, "maxlen": max_ligand_len,
                                 "include_hydrogens": include_hydrogens,
                                 "include_alternative_models": include_alternative_models,
                                 "alternative_lig_aa": alternative_lig_aa,
@@ -325,3 +392,101 @@ def generate_atlas(filenames: List[str], ir_default: float = 4.0, ir_hbond: floa
         for dps in executor.map(__open_and_add_datapoints, filenames):
             atlas.datapoints.extend(dps)
     return atlas
+
+
+class AtlasGeneration:
+    """
+    Keeps track of atlas generation and processed input files with a simple observer method.
+    """
+
+    def __init__(self, files: List[str]):
+        self.files = files
+        self.processed = set()
+        self.total = len(files)
+
+    def simple_observer(self, file):
+        self.processed.add(file)
+        logger.info(f"Finished processing with {len(self.processed)} of {self.total} input structures.\t({file})")
+
+    def generate_atlas(self, ir_default: float = 4.0, ir_hbond: float = 6.0, ir_aromatic: float = 6.0,
+                       ir_ionic: float = 8.0, min_ligand_len: int = 3, max_ligand_len: int = 20, n_workers: int = -1,
+                       include_hydrogens: bool = False, include_alternative_models: bool = False,
+                       observer: Callable[[str], None] = None, alternative_lig_aa: str = None,
+                       restrict_to_alternative: bool = True, allow_self_interactions: bool = False,
+                       skip_bb_atoms: bool = True) -> Atlas:
+        return generate_atlas(filenames=self.files,
+                              ir_default=ir_default,
+                              ir_hbond=ir_hbond,
+                              ir_aromatic=ir_aromatic,
+                              ir_ionic=ir_ionic,
+                              min_ligand_len=min_ligand_len,
+                              max_ligand_len=max_ligand_len,
+                              n_workers=n_workers,
+                              include_hydrogens=include_hydrogens,
+                              include_alternative_models=include_alternative_models,
+                              alternative_lig_aa=alternative_lig_aa,
+                              restrict_to_alternative=restrict_to_alternative,
+                              allow_self_interactions=allow_self_interactions,
+                              observer=self.simple_observer if observer is None else observer,
+                              skip_bb_atoms=skip_bb_atoms)
+
+
+def atlas_to_json_file(atlas: Atlas, fp):
+    """
+    Dumps the json represenation of an Atlas to an open file handle
+    :param atlas: Atlas to json convert
+    :param fp: open file handle to write json into
+    :return: None
+    """
+    return atlas.to_json_file(fp=fp)
+
+
+def atlas_to_json(atlas: Atlas):
+    """
+    Returns the json represenation of an Atlas
+    :param atlas: Atlas to json convert
+    :return: json represenation of an Atlas
+    """
+    return atlas.to_json()
+
+
+def json_to_atlas(json_str_or_file: Union[str, TextIO]):
+    """
+    Return an Atlas from a json representation of one.
+    :param json_str_or_file: json representation of an Atlas or open file handle containing it
+    :return: Atlas based on json
+    """
+    return Atlas.from_json(json_str_or_file=json_str_or_file)
+
+
+def get_atoms_from_json(atom_dict: Dict[str, Dict]):
+    """
+    Return an atom representation as a Dict of Vectors from a json representation of one.
+    :param atom_dict: json representation of atoms
+    :return: dictionary with atom names and Vectors based on json
+    """
+    return {atom: Vector(**vector) for atom, vector in atom_dict.items()}
+
+
+class AtlasEncoder(json.JSONEncoder):
+    """
+    Enables the json Encoder to also encode an Atlas or AtlasDatapoint or Vector
+    """
+
+    def default(self, obj):
+        if isinstance(obj, Vector):
+            return {'x': obj[0],
+                    'y': obj[1],
+                    'z': obj[2]}
+        if isinstance(obj, AtlasDatapoint):
+            return {'ligand_restype': obj.ligand_restype,
+                    'binder_restype': obj.binder_restype,
+                    'ligand_origin': obj.ligand_origin,
+                    'binder_origin': obj.binder_origin,
+                    'ligand_atoms': obj.ligand_atoms,
+                    'binder_atoms': obj.binder_atoms}
+        elif isinstance(obj, Atlas):
+            return {'features': obj.features,
+                    'datapoints': obj.datapoints}
+        else:
+            return json.JSONEncoder.default(self, obj)

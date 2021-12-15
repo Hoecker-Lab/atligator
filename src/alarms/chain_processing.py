@@ -14,7 +14,7 @@ On 4 cores of i7 7700K.
 :Author: Josef Kynast <josef.kynast@uni-bayreuth.de>
 :date: 2018-04-05
 """
-
+import logging
 import os
 import pathlib
 # for multithreading without progress bar:
@@ -33,6 +33,7 @@ from tqdm import tqdm
 from atligator.pdb_util import ChainSelect, NoBinderAtoms, NoLigandAtoms, NoResidueInDistance
 from atligator.pdb_util import get_nonbinder_residues_within_radius
 
+logger = logging.getLogger(__name__)
 
 def multiprocess(array, func, n=1) -> Dict:
     """
@@ -70,7 +71,7 @@ def process_threaded_w_prog(array, func, n=1) -> Dict:
     else:
         print_size = f"{sizecounter} B"
 
-    print(f"Found {len(array)} files with a total size of {print_size}")
+    logger.info(f"Found {len(array)} files with a total size of {print_size}")
     return imap_unordered(sizecounter, array, element_size, func, n)
 
 
@@ -181,6 +182,8 @@ class MultiProcessChainProcessing:
         """
         self.pdbs = pdbs
         self.output_path = output_path
+        if not pathlib.Path(output_path).is_dir():
+            pathlib.Path(output_path).mkdir()
         self.min_binder_len = min_binder_len
         self.min_ligand_len = min_ligand_len
         self.max_distance = max_distance

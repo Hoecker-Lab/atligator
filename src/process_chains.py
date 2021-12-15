@@ -12,21 +12,26 @@ Should be performed before select_by_sec_struc.py
 :Author: Josef Kynast <josef.kynast@uni-bayreuth.de>
 :date: 2018-03-07
 """
+import logging
 import pathlib
 import time
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from glob import iglob
+from typing import Dict
 
 from alarms.chain_processing import MultiProcessChainProcessing
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
-def work(args) -> str:
+
+def work(args) -> Dict:
+    logger.info(f"Started preprocessing of given pdb structures.")
     start_time = time.perf_counter()
     if args.output_path is None:
         output_path = "./"
     else:
         output_path = args.output_path
-
     pdbs = [x for x in iglob(args.pdb_files) if ".pdb" in x]
     process = MultiProcessChainProcessing(pdbs=pdbs, output_path=output_path, min_binder_len=args.min_binder_len,
                                           min_ligand_len=args.min_ligand_len, max_distance=args.max_distance,
@@ -42,12 +47,13 @@ def work(args) -> str:
                 objects_file.write(" OUT " + out_file + "\n")
 
     end_time = time.perf_counter()
-    print("CPU time wasted for chain processing:", int((end_time - start_time) / 60), "min",
-          int((end_time - start_time) % 60), "sec.")
-    return output_path
+    logger.info(f"CPU time wasted for chain processing: {int((end_time - start_time) / 60)} min "
+                f"{int((end_time - start_time) % 60)} sec.")
+    return objects_dict
 
 
 if __name__ == "__main__":
+    # noinspection PyTypeChecker
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     gr = '\033[37m'
     wt = '\033[0m'

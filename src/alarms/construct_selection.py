@@ -6,6 +6,7 @@ I might update this at some point or remove it in favour of alternative algorith
 :Author: Josef Kynast <josef.kynast@uni-bayreuth.de>
 :date: 2018-04-11
 """
+import logging
 from typing import List, Tuple, Dict, Callable, Union
 
 import matplotlib.path as mpl_path
@@ -16,6 +17,7 @@ from scipy import spatial
 
 from atligator.pdb_util import is_amino_acid_residue, degrees
 
+logger = logging.getLogger(__name__)
 
 class GetRowInPolygon:
     def __init__(self):

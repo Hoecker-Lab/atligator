@@ -91,7 +91,7 @@ class TestAtlas(unittest.TestCase):
         self.filepath = Path(__file__).parent.joinpath(self.filename).__str__()
         self.filepath_big = Path(__file__).parent.joinpath(self.filename_big).__str__()
         self.parameters = {"ir_default": 4.0, "ir_hbond": 6.0, "ir_aromatic": 6.0, "ir_ionic": 8.0,
-                           "minlen": 1, "maxlen": 20, "include_hydrogens": False,
+                           "min_ligand_len": 1, "max_ligand_len": 20, "include_hydrogens": False,
                            "include_alternative_models": False, "alternative_lig_aa": None,
                            "restrict_to_alternative": True, "allow_self_interactions": False, "skip_bb_atoms": False}
         self.atlas = generate_atlas([self.filepath], **self.parameters, n_workers=1, observer=None)

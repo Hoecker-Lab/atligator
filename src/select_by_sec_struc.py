@@ -9,20 +9,31 @@ Should be performed after process_chains.py
 :Author: Josef Kynast <josef.kynast@uni-bayreuth.de>
 :date: 2018-03-07
 """
+import logging
 import pathlib
 import shutil
 import time
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from glob import iglob
+from typing import Union, List
 
 from alarms.construct_selection import SelectionProcess
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
-def work(args):
+
+def work(args, preprocessed_files: Union[List[str], None] = None):
+    logger.info(f"Started selecting pdb structures by given parameters.")
     start_time = time.perf_counter()
 
-    pdbs = [f for f in iglob(args.pdb_files) if ".pdb" in f]
+    if preprocessed_files is None:
+        pdbs = [f for f in iglob(args.pdb_files) if ".pdb" in f]
+    else:
+        pdbs = preprocessed_files
     process = SelectionProcess(pdbs=pdbs)
+    if not pathlib.Path(args.output_path).is_dir():
+        pathlib.Path(args.output_path).mkdir()
     filtered = process.filter_pdbs(alphatotal=args.alphatotal, betatotal=args.betatotal, alphabeta=args.alphabeta,
                                    betaalpha=args.betaalpha)
     if args.output_path is None:
@@ -38,14 +49,15 @@ def work(args):
                 try:
                     shutil.copy(file, pathlib.Path(args.output_path) / pathlib.Path(file).name)
                 except PermissionError as e:
-                    print(e)
+                    logger.warning(e)
 
     end_time = time.perf_counter()
-    print("CPU time wasted for selection process:", int((end_time - start_time) / 60), "min",
-          int((end_time - start_time) % 60), "sec.")
+    logger.info(f"CPU time wasted for selection process: {int((end_time - start_time) / 60)} min "
+                f"{int((end_time - start_time) % 60)} sec.")
 
 
 if __name__ == "__main__":
+    # noinspection PyTypeChecker
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     gr = '\033[37m'
     wt = '\033[0m'

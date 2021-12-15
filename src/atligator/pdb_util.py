@@ -11,6 +11,7 @@ import os
 import urllib
 from http.client import HTTPResponse
 from math import degrees, sqrt
+from pathlib import Path
 from shutil import copyfileobj
 from typing import Iterator, List, Tuple, Dict, Union, TextIO
 
@@ -30,6 +31,8 @@ from numpy import ndarray
 from scipy import spatial
 
 from atligator.geometry import InternalCoordinates, Matrix
+
+logger = logging.getLogger(__name__)
 
 # typedef "forwarded" from module atligator.structure
 LigandInfo = Tuple[str, str, str]  # (chain_id, residue_id, new_residue_type)
@@ -293,7 +296,7 @@ def get_nonbinder_residues_within_radius(model: Model, binder_chain: Chain,
     try:
         binder_atoms = np.concatenate(binder_atoms, axis=0).reshape((-1, 3))
     except ValueError:
-        return NoBinderAtoms
+        raise NoBinderAtoms
 
     ligand_atoms = []
     ligand_atoms_res = []
@@ -829,14 +832,12 @@ def calc_rmsd(a: ndarray, b: ndarray) -> float:
     return np.sqrt(rmsd / n_points)
 
 
-def find_pdb_keys_in_scop_dir_cla(query: str, scop_dir_cla_file: Union[TextIO, HTTPResponse],
-                                  decode: bool = False) -> Union[List[str], None]:
+def find_pdb_keys_in_scop_dir_cla(query: str, scop_dir_cla_file: Union[TextIO, HTTPResponse]) -> Union[List[str], None]:
     """
     Parses a SCOP(e) directory classification file (dir.cla.scop*.txt) in order to find a list of PDB keys that match
     the given scop query (e.g., 'a', 'a.118.1', etc.)
     :param query: the class, fold, superfamily, or family to search
     :param scop_dir_cla_file: part of the SCOP(e) database that contains the classification
-    :param decode: If True it tries to decode the lines in scop_dir_cla_file
     :return: list of PDB files that match the query, or None if the query was not well-formed
     """
     pdb_keys = set()
@@ -844,6 +845,7 @@ def find_pdb_keys_in_scop_dir_cla(query: str, scop_dir_cla_file: Union[TextIO, H
     if len(query_split) < 1:
         return None
     query_split = query_split if len(query_split[-1]) else query_split[:-1]
+    decode = True if isinstance(scop_dir_cla_file, HTTPResponse) else False
     for line in scop_dir_cla_file:
         if decode:
             line = line.decode("utf-8")
@@ -861,21 +863,20 @@ def find_pdb_keys_in_scop_dir_cla(query: str, scop_dir_cla_file: Union[TextIO, H
     return sorted(list(pdb_keys))
 
 
-def get_available_scop_dir_cla_file(scop_dir_cla_file: str = None) -> Tuple[Union[TextIO, HTTPResponse], bool]:
+def get_available_scop_dir_cla_file(scop_dir_cla_file: str = None) -> Union[TextIO, HTTPResponse]:
     """
-    Returns the opened scop_dir_cla_file necessary for matching scop ids and pdb ids in a tuple with a boolean
-    that shows if the file needs to be decoded or not.
+    Returns the opened scop_dir_cla_file necessary for matching scop ids and pdb ids
 
     :param scop_dir_cla_file: file of the SCOP(e) database that contains the classification. Either string with path to
     the file locally or None. If None the file is downloaded from
     https://scop.berkeley.edu/downloads/parse/dir.cla.scope.2.08-stable.txt
-    :return: Tuple of the opened scop_dir_cla_file and a boolean that shows, if file needs to be decoded before use.
+    :return: The opened scop_dir_cla_file
     """
     if scop_dir_cla_file is not None and os.path.isfile(scop_dir_cla_file):
-        return open(scop_dir_cla_file, "r"), False
+        return open(scop_dir_cla_file, "r")
     logging.info("Downloading https://scop.berkeley.edu/downloads/parse/dir.cla.scope.2.08-stable.txt to search for "
                  "matching patterns...")
-    return urllib.request.urlopen("https://scop.berkeley.edu/downloads/parse/dir.cla.scope.2.08-stable.txt"), True
+    return urllib.request.urlopen("https://scop.berkeley.edu/downloads/parse/dir.cla.scope.2.08-stable.txt")
 
 
 def find_scop_i_from_pdbs(query: List[str], scop_dir_cla_file: str = None) \
@@ -891,7 +892,8 @@ def find_scop_i_from_pdbs(query: List[str], scop_dir_cla_file: str = None) \
     """
     pdb_keys = set(query)
     pdb_scop_dict = dict((a, None) for a in query)
-    with get_available_scop_dir_cla_file(scop_dir_cla_file=scop_dir_cla_file) as (fo, decode):
+    with get_available_scop_dir_cla_file(scop_dir_cla_file=scop_dir_cla_file) as fo:
+        decode = True if isinstance(scop_dir_cla_file, HTTPResponse) else False
         for line in fo:
             if decode:
                 line = line.decode("utf-8")
@@ -955,9 +957,8 @@ def get_structures_matching_scop_query(query: str, scop_dir_cla_file: str = None
     the file locally or None. If None the file is downloaded from
     https://scop.berkeley.edu/downloads/parse/dir.cla.scope.2.08-stable.txt
     """
-    if scop_dir_cla_file is not None and os.path.isfile(scop_dir_cla_file):
-        with get_available_scop_dir_cla_file(scop_dir_cla_file=scop_dir_cla_file) as (scop_dir_cla_opened, decode):
-            return find_pdb_keys_in_scop_dir_cla(query=query, scop_dir_cla_file=scop_dir_cla_opened, decode=decode)
+    with get_available_scop_dir_cla_file(scop_dir_cla_file=scop_dir_cla_file) as scop_dir_cla_opened:
+        return find_pdb_keys_in_scop_dir_cla(query=query, scop_dir_cla_file=scop_dir_cla_opened)
 
 
 def download_pdbs_by_scop_query(query: str, dest_dir: str, scop_dir_cla_file: str = None, local_db: bool = False,
@@ -976,11 +977,19 @@ def download_pdbs_by_scop_query(query: str, dest_dir: str, scop_dir_cla_file: st
     if not os.path.exists(dest_dir):
         os.makedirs(dest_dir)
     pdbkeys = get_structures_matching_scop_query(query=query, scop_dir_cla_file=scop_dir_cla_file)
-    print("Found no matching files." if not len(pdbkeys) else f"Found {len(pdbkeys)} matching pdb files.")
+    if not len(pdbkeys):
+        logger.warning("Found no matching files.")
+    else:
+        logger.info(f"Found {len(pdbkeys)} matching pdb files.")
     for k in pdbkeys:
         out_file = get_pdb_structure(pdb_key=k, dest_dir=dest_dir, pdb_db_path=pdb_db_path, local=local_db)
         if not os.path.isfile(out_file):
             logging.warning(f"The file {out_file} cannot be found in the pdb database.")
+        else:
+            logger.info(f'Downloading {out_file} and renaming to '
+                        f'{Path(out_file).parent / Path(out_file).name.replace("pdb", "").replace(".ent", ".pdb")}')
+            Path(out_file).rename(
+                Path(out_file).parent / Path(out_file).name.replace("pdb", "").replace(".ent", ".pdb"))
 
 
 class ChainSelect(Select):

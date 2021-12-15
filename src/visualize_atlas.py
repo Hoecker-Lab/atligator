@@ -12,16 +12,17 @@ Example:
 """
 
 import pickle
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, FileType
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 from atligator.visualization import visualize_atlas
 
 # Main script. It processes the atlas file specified in the first argument and visualizes the residues associated with
 # the ligand residue types provided in the second argument
 if __name__ == "__main__":
+    # noinspection PyTypeChecker
     ap = ArgumentParser(description="visualizes the residues aligned with a specific ligand type in an atlas.",
                         formatter_class=ArgumentDefaultsHelpFormatter)
-    ap.add_argument("atlas_file", type=FileType('rb'), help="an .atlas file that contains residues to visualize.")
+    ap.add_argument("atlas_file", type=str, help="an .atlas file that contains residues to visualize.")
     ap.add_argument("-l", "--ligand_restype", type=str,
                     help="if set, this restricts the ligand residue type whose aligned binder residues to show "
                          "to a specfic type. Use three-letter codes, e.g., ARG.")
@@ -34,7 +35,7 @@ if __name__ == "__main__":
                     help="Whether to draw secondary orientation vectors of binder residues. Only used with "
                          "matplotlib method.")
     args = ap.parse_args()
-    with open(args.atlas_file.name, 'rb') as fo:
+    with open(args.atlas_file, 'rb') as fo:
         atlas = pickle.load(fo)
     visualize_atlas(atlas,
                     method=args.method,

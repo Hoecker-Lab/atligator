@@ -12,9 +12,10 @@ Example:
 :Author: Felix Schwaegerl <felix.schwaegerl@uni-bayreuth.de>
 :date: 2018-05-18
 """
-
+import logging
 import pickle
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, FileType
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from pathlib import Path
 from pickle import load, dump
 
 from Bio.PDB.PDBIO import PDBIO
@@ -23,16 +24,20 @@ from Bio.SeqUtils import seq1
 from atligator.html_util import generate_html_pocket_index, generate_html_pocket_description
 from atligator.pocket_miner import mine_pockets
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # Main script. Processes the atlas, analyzes it in terms of pocket itemsets, identifies frequent pocket itemsets,
 # and uses this information to filter the atlas by different pockets, such that one individual atlas per pocket
 # detected is obtained
 if __name__ == "__main__":
+    # noinspection PyTypeChecker
     ap = ArgumentParser(description="analyzes an atlas in terms of frequent pocket itemsets and splits the information"
                                     " into disjoint atlases for every pocket identified.",
                         formatter_class=ArgumentDefaultsHelpFormatter)
-    ap.add_argument("atlas", type=FileType('r'), help="an atlas to serve as input for the analysis")
-    ap.add_argument("-x", "--max_atlases", type=int, default=5,
-                    help="maximum number of atlases generated for every ligand residue type")
+    ap.add_argument("atlas", type=str, help="an atlas to serve as input for the analysis")
+    ap.add_argument("-x", "--max_pockets", type=int, default=5,
+                    help="maximum number of pockets generated for every ligand residue type")
     ap.add_argument("-m", "--min_cardinality", type=int, default=3,
                     help="minimum cardinality of itemsets, i.e. the number of residues part of a pocket")
     ap.add_argument("-n", "--confidence_threshold", type=float, default=0.05,
@@ -52,8 +57,7 @@ if __name__ == "__main__":
                     help="the residues contained by every cluster are allowed to have at most this variance; if this "
                          "is exceeded, the cluster is reduced in an iterative post-processing step")
     ap.add_argument("-o", "--output_folder", type=str, default='pockets',
-                    help="the created pocket atlases will be stored in this folder. This directory must be existant "
-                         "and the path must not include a trailing '/'.")
+                    help="the created pocket atlases will be stored in this folder. This directory must be existant.")
     ap.add_argument("-f", "--pockets_filename", type=str, default='pockets.pockets',
                     help="name of the to be dumped pocket file inside the output folder")
     ap.add_argument("-a", "--save_atlases", action="store_true",
@@ -74,10 +78,10 @@ if __name__ == "__main__":
     ap.add_argument("-k", "--n_workers", type=int, default=-1,
                     help="Number of workers to use for parallel processing. -1 for number of CPU cores")
     args = ap.parse_args()
-    with open(args.atlas.name, 'rb') as fo:
+    with open(args.atlas, 'rb') as fo:
         atlas = load(fo)
     pockets = mine_pockets(atlas,
-                           max_atlases_per_ligand_restype=args.max_atlases,
+                           max_pockets_per_ligand_restype=args.max_pockets,
                            min_itemset_cardinality=args.min_cardinality,
                            confidence_threshold=args.confidence_threshold,
                            support_threshold=args.support_threshold,
@@ -86,12 +90,12 @@ if __name__ == "__main__":
                            secor_factor=args.secor_factor,
                            variance_threshold=args.variance_threshold,
                            n_workers=args.n_workers)
-    with open(args.output_folder + '/' + args.pockets_filename, 'wb') as fo:
+    with open(Path(args.output_folder) / args.pockets_filename, 'wb') as fo:
         pickle.dump(pockets, fo)
     for lig_restype, pocketlist in pockets.items():
         for pocket in pocketlist:
-            filename = f"{args.output_folder}/{seq1(lig_restype)}_{pocket.pocket_id()}_" \
-                       f"{int(pocket.support * 100.0)}.atlas"
+            filename = str(Path(args.output_folder) / f"{seq1(lig_restype)}_{pocket.pocket_id()}_"
+                                                      f"{int(pocket.support * 100.0)}.atlas")
             pocket_atlas = pocket.to_atlas()
             if args.save_atlases:
                 with open(filename, 'wb') as fo:
