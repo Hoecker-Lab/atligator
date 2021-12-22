@@ -9,17 +9,18 @@ computational optimization.
 :date: 2018-06-11
 """
 import copy
+from itertools import product, combinations
 from operator import itemgetter
-from typing import Callable
+from typing import Callable, Union
 from typing import List, Tuple, Dict, Set
 
+from Bio.PDB import PDBParser, PDBIO
 from Bio.PDB.Atom import Atom
 from Bio.PDB.Residue import Residue
 from Bio.PDB.Structure import Structure
 
 from atligator.acomplex import LigandBinderComplex, ComplexDescriptor, generate_complex
 from atligator.atlas import AtlasDatapoint
-from atligator.pdb_util import mutate_residue
 from atligator.pocket_miner import Pocket, PocketCluster
 from atligator.structure import DesignedBinderResidue, get_icoor_from_aresidue, DesignedLigandResidue, AbstractResidue
 
@@ -29,6 +30,7 @@ class ResidueGraft:
     A residue graft describes the change of a residue type and the coordinates of its atoms, based on datapoints from
     a pocket cluster.
     """
+
     def __init__(self, binder_res: DesignedBinderResidue, pocket_cluster: PocketCluster, penalty: float):
         """Creates a new instance.
         :param binder_res: the binder residue to be mutated from the acomplex
@@ -39,12 +41,17 @@ class ResidueGraft:
         self.pocket_cluster = pocket_cluster
         self.penalty = penalty
 
+    def __repr__(self):
+        return f"<ResidueGraft {self.binder_res.original_residue_type}{self.binder_res.residue_id}: " \
+               f"{self.pocket_cluster.binder_restype}>"
+
 
 class PocketGraft:
     """
     A pocket graft represents a set of binder residue grafts, which have been determined based on the properties of
     one given ligand residue.
     """
+
     def __init__(self, ligand_res: DesignedLigandResidue, residue_grafts: List[ResidueGraft]):
         """Creates a new instance.
         :param ligand_res: the ligand residue whose surrounding binder residues are subject to grafting
@@ -52,6 +59,9 @@ class PocketGraft:
         """
         self.ligand_res = ligand_res
         self.residue_grafts = residue_grafts
+
+    def __repr__(self):
+        return f"<PocketGraft {self.ligand_res.restype}{self.ligand_res.residue_id}: {self.residue_grafts}>"
 
     def penalty(self) -> float:
         """
@@ -66,11 +76,15 @@ class BinderGraft:
     """
     A binder graft consists of several residue grafts, grouped by pocket grafts.
     """
+
     def __init__(self, pocket_grafts: List[PocketGraft]):
         """Creates a new instance
         :param pocket_grafts: disjoint partition of residue grafts.
         """
         self.pocket_grafts = pocket_grafts
+
+    def __repr__(self):
+        return f"<BinderGraft {self.pocket_grafts}>"
 
     def penalty(self) -> float:
         """
@@ -152,32 +166,62 @@ def get_pocket_grafts_for_candidates(ligand_residue: DesignedLigandResidue,
                   key=lambda pg: pg.penalty())
 
 
-def get_optimal_binder_graft(wildcard_residues: List[DesignedBinderResidue], pocket_grafts: List[PocketGraft]) \
-        -> BinderGraft:
-    """Given a list of wildcard residues and a list of pocket grafts, which potentially contain contradicting grafts
-    for equivalent residues, this function calculates the globally optimal partitioning of residue grafts to pocket
-    grafts, such that the total penalty is minimized. This is realized by removing all but the minimal-penalty graft
-    suggested for every wildcard residue
-    :param wildcard_residues: the wildcard residues the generated binder graft refers to
-    :param pocket_grafts: pocket grafts obtained by local optimization of ligand pockets. They may contain mutually
-    contradicting residue grafts
-    :return: a minimum-penalty and non-contradictory binder graft
+def get_optimal_binder_graft(pocket_grafts: Dict[int, List[PocketGraft]], max_binder_grafts: int = 1) \
+        -> List[BinderGraft]:
+    """ Given a dictionary of containing lists of pocket grafts, which potentially contain contradicting grafts
+    for equivalent residues, this function selects the binder grafts with minimal penalty containing as many as possible
+    pocket grafts (one per ligand position).
+    :param pocket_grafts: pocket grafts obtained by local optimization of ligand pockets. In a dictionary with indices
+    (range(x)) as keys (for the different ligand positions) and a list of pocket grafts as values (ordered by penalty
+    - should not be required though).
+    :param max_binder_grafts: Maximum number of binder grafts returned
+    :return: a list of minimum-penalty and non-contradictory binder grafts, sorted by ascending penalty
     """
-    for wres in wildcard_residues:
-        minpen = float('inf')
-        minpen_graft: PocketGraft = None
-        for pg in pocket_grafts:
-            for rg in pg.residue_grafts:
-                if rg.binder_res.chain == wres.chain and rg.binder_res.residue_id == wres.residue_id and \
-                        rg.penalty < minpen:
-                    minpen = rg.penalty
-                    minpen_graft = pg
-        for pg in pocket_grafts:
-            if pg != minpen_graft:
-                for rg in pg.residue_grafts[:]:
-                    if rg.binder_res.chain == wres.chain and rg.binder_res.residue_id == wres.residue_id:
-                        pg.residue_grafts.remove(rg)
-    return BinderGraft(pocket_grafts)
+
+    def get_combinations(nones: int = 0):
+        if not nones:
+            return product(*(range(len(x)) for x in pocket_grafts.values()))
+
+        none_combinations = combinations(range(n_pockets), nones)
+        combin = []
+        for none_positions in none_combinations:
+            x_list = list(range(len(x)) for k, x in pocket_grafts.items() if k not in none_positions)
+            for none in none_positions:
+                x_list.insert(none, [None])
+            combin.extend(list(product(*x_list)))
+        return combin
+
+    def get_penalty(graft_ids):
+        return sum(penalty_dict[gi_n][gi] for gi_n, gi in enumerate(graft_ids))
+
+    def mutually_exclusive(c):
+        sets = [residue_sets[lg][pg] for lg, pg in enumerate(c)]
+        return not any(set_c[0] & set_c[1] for set_c in combinations(sets, 2))
+
+    residue_sets = {}
+    penalty_dict = {}
+    for lig, pgs in pocket_grafts.items():
+        residue_sets[lig] = {}
+        penalty_dict[lig] = {}
+        for i, pg in enumerate(pgs):
+            residue_sets[lig][i] = {(rg.binder_res.chain, rg.binder_res.residue_id) for rg in pg.residue_grafts}
+            penalty_dict[lig][i] = pg.penalty()
+        residue_sets[lig][None] = set()
+        penalty_dict[lig][None] = 0.0
+
+    n_pockets = len(list(pocket_grafts))
+    binder_grafts = []
+    n_lacking_pockets = 0
+    while n_lacking_pockets < n_pockets:
+        for comb in sorted(get_combinations(n_lacking_pockets), key=get_penalty):
+            if mutually_exclusive(comb):
+                binder_grafts.append(
+                    BinderGraft(pocket_grafts=[pocket_grafts[ci][c] for ci, c in enumerate(comb) if c is not None])
+                )
+                if len(binder_grafts) >= max_binder_grafts:
+                    return binder_grafts
+        n_lacking_pockets += 1
+    return binder_grafts
 
 
 def select_best_pocket_graft(candidates: List[PocketGraft]) -> PocketGraft:
@@ -192,10 +236,10 @@ def select_best_pocket_graft(candidates: List[PocketGraft]) -> PocketGraft:
 def get_optimal_graft_for_acomplex(acomplex: LigandBinderComplex, pockets: Dict[str, List[Pocket]],
                                    penalty_threshold: float, distance_factor: float, orient_factor: float,
                                    secor_factor: float,
-                                   select: Callable[[List[PocketGraft]], PocketGraft] = select_best_pocket_graft,
+                                   select: Callable[[List[BinderGraft]], BinderGraft] = select_best_pocket_graft,
                                    loc_observer: Callable[[int, int], None] = None,
                                    glob_observer: Callable[[int, int], None] = None) -> BinderGraft or None:
-    """Based on a ligand/binder complex and a pocket dictionary, this method calculates an optimal binder graft based
+    """ Based on a ligand/binder complex and a pocket dictionary, this method calculates an optimal binder graft based
     on a configurable candidate selection strategy
     :param acomplex: the ligand binder complex that defines both ligand residues and wildcards in the binder
     :param pockets: the output of a pocket mining run providing the basis for pocket selection
@@ -203,12 +247,12 @@ def get_optimal_graft_for_acomplex(acomplex: LigandBinderComplex, pockets: Dict[
     :param distance_factor: see calculate_penalty
     :param orient_factor: see calculate_penalty
     :param secor_factor: see calculate_penalty
-    :param select: the selection strategy to apply for choosing a pocket graft
+    :param select: the selection strategy to apply for choosing a binder graft
     :param loc_observer: callback to react to the progress of the local optimization stage
     :param glob_observer: callback to react to the progress of the local optimization stage
     :return: a globally optimal binder graft, or None if selection was cancelled
     """
-    pocket_grafts: List[PocketGraft] = []
+    pocket_grafts: Dict[int, List[PocketGraft]] = {}
     loc_len = len(acomplex.ligand.residues)
     if loc_observer is not None:
         loc_observer(0, loc_len)
@@ -218,13 +262,14 @@ def get_optimal_graft_for_acomplex(acomplex: LigandBinderComplex, pockets: Dict[
         ligpockets = pockets[ligres.restype]
         pgs = get_pocket_grafts_for_candidates(ligres, wc_res, ligpockets, penalty_threshold, distance_factor,
                                                orient_factor, secor_factor)
-        selection = select(pgs)
-        if selection is None:
-            return None
-        pocket_grafts.append(selection)
+        pocket_grafts[i] = pgs
         if loc_observer is not None:
             loc_observer(i, loc_len)
-    binder_graft = get_optimal_binder_graft(acomplex.binder.residues, pocket_grafts)
+
+    binder_grafts = get_optimal_binder_graft(pocket_grafts=pocket_grafts, max_binder_grafts=1)
+    binder_graft = select(binder_grafts)
+    if binder_graft is None:
+        return None
     glob_len = len(binder_graft.pocket_grafts)
     if glob_observer is not None:
         glob_observer(0, glob_len)
@@ -340,9 +385,9 @@ def apply_binder_graft(scaffold: Structure, binder_graft: BinderGraft, distance_
 
 def simple_graft(scaffold: Structure, descriptor: ComplexDescriptor, pockets: Dict[str, List[Pocket]],
                  penalty_threshold: float, distance_factor: float, orient_factor: float, secor_factor: float,
-                 select: Callable[[List[PocketGraft]], PocketGraft] = select_best_pocket_graft,
+                 select: Callable[[List[BinderGraft]], BinderGraft] = select_best_pocket_graft,
                  loc_observer: Callable[[int, int], None] = None,
-                 glob_observer: Callable[[int, int], None] = None) -> BinderGraft:
+                 glob_observer: Callable[[int, int], None] = None) -> Tuple[Union[BinderGraft, None], Structure]:
     """This function implements a simple algorithm for mutating the residues of a binder protein to match a ligand
     with given sequence. To find these mutations, information from the pocket miner is exploited.
     :param scaffold: the scaffold PDB structure that is modified in-place
@@ -357,16 +402,16 @@ def simple_graft(scaffold: Structure, descriptor: ComplexDescriptor, pockets: Di
     :param glob_observer: callback to react to the progress of the local optimization stage
     :return: the binder graft representing the best solution
     """
-    for chain_id, residue_id, new_residue_type in descriptor.ligand_info:
-        residue: Residue = scaffold[0][chain_id][int(residue_id)]
-        mutate_residue(residue, new_residue_type)
-    acomplex = generate_complex(None, scaffold, descriptor)
-    opt_graft = get_optimal_graft_for_acomplex(acomplex, pockets,
-                                               penalty_threshold, distance_factor, orient_factor, secor_factor,
-                                               select, loc_observer, glob_observer)
+    design = copy.deepcopy(scaffold)
+    acomplex = generate_complex(None, design, descriptor)
+
+    opt_graft = get_optimal_graft_for_acomplex(acomplex=acomplex, pockets=pockets,
+                                               penalty_threshold=penalty_threshold, distance_factor=distance_factor,
+                                               orient_factor=orient_factor, secor_factor=secor_factor,
+                                               select=select, loc_observer=loc_observer, glob_observer=glob_observer)
     if opt_graft is not None:
-        apply_binder_graft(scaffold, opt_graft, distance_factor, orient_factor, secor_factor)
-        return opt_graft
+        apply_binder_graft(design, opt_graft, distance_factor, orient_factor, secor_factor)
+    return opt_graft, design
 
 
 def multi_graft(scaffold: Structure, descriptor: ComplexDescriptor, pockets: Dict[str, List[Pocket]],
@@ -388,7 +433,7 @@ def multi_graft(scaffold: Structure, descriptor: ComplexDescriptor, pockets: Dic
     belonging to every solution
     """
 
-    def _select_ith_pocket_graft(candidates: List[PocketGraft]) -> PocketGraft:
+    def _select_ith_pocket_graft(candidates: List[BinderGraft]) -> BinderGraft:
         try:
             return candidates[i]
         except IndexError:
@@ -396,9 +441,8 @@ def multi_graft(scaffold: Structure, descriptor: ComplexDescriptor, pockets: Dic
 
     result: List[Tuple[float, BinderGraft, Structure]] = []
     for i in range(n_solutions):
-        structure = copy.deepcopy(scaffold)
-        binder_graft = simple_graft(structure, descriptor, pockets, penalty_threshold, distance_factor, orient_factor,
-                                    secor_factor, select=_select_ith_pocket_graft)
+        binder_graft, structure = simple_graft(scaffold, descriptor, pockets, penalty_threshold, distance_factor,
+                                               orient_factor, secor_factor, select=_select_ith_pocket_graft)
         if observer is not None:
             observer(i)
         if binder_graft is None:
@@ -431,21 +475,164 @@ def get_mutations_single_p_graft(pocket: Pocket, scaffold: Structure, descriptor
         pocket_graft.residue_grafts[i].binder_res = rg.binder_res.transform_coor(icoor, False)
 
     pocket_grafts.append(pocket_graft)
-    binder_graft = BinderGraft(pocket_grafts) # No need to find best graft, because we only have one
-    #binder_graft = get_optimal_binder_graft(acomplex.binder.residues, pocket_grafts) TODO remove
+    binder_graft = BinderGraft(pocket_grafts)  # No need to find best graft, because we only have one
     apply_binder_graft(scaffold, binder_graft, distance_factor, orient_factor, secor_factor, res_lock=res_lock)
     return pocket_graft, scaffold
-    # for i, pg in enumerate(binder_graft.pocket_grafts):
-    #    icoor = get_icoor_from_aresidue(pg.ligand_res)
-    #    for rg in pg.residue_grafts:
-    #        binder_res: DesignedBinderResidue = rg.binder_res
-    #        rg.binder_res = binder_res.transform_coor(icoor, False)
 
-    # if binder_graft is not None:
-    #    apply_binder_graft(scaffold, binder_graft, distance_factor, orient_factor, secor_factor)
-    #    return binder_graft
 
-    # return pocket_graft
-    # mutations = []
-    # for res_graft in pocket_graft.residue_grafts:
-    #    mutations.append((res_graft.binder_res.residue_id, res_graft.))
+def prepare_scaffold_and_descriptor_for_grafting(scaffold_name: str,
+                                                 ligand_residues: Union[Tuple[str, str],
+                                                                        Dict[str, Dict[Union[str, int], str]]],
+                                                 design_positions: Dict[str, List[Union[str, int]]],
+                                                 pocket_restype: str = None):
+    """
+    Prepares the scaffold structure (Bio.PDB) from path string and the ComplexDescriptor from definitions
+    of ligand residues and binder residues for subsequent grafting.
+
+    :param scaffold_name: the path to a pdb structure including the chain ids and res ids given in ligand_residue
+    and design_positions.
+    :param ligand_residues:
+    Either: A tuple of chain id, residue id (str or int) and desired residue type (needs a pocket_restype definition!)
+    OR: A dict of chain id matched with a dict of residue id (str or int) and desired residue type.
+    :param design_positions: A dictionary with the keys being the chain ids and the values being a list of all residue
+    ids that should be allowed to be mutated while grafting.
+    :param pocket_restype: The residue type the ligand should be mutated to. Only used if ligand_residues is a tuple.
+    :return: scaffold as Bio.PDB structure and ComplexDescriptor
+    """
+
+    scaffold = PDBParser(QUIET=True).get_structure(scaffold_name,
+                                                   scaffold_name)
+    if isinstance(ligand_residues, dict):
+        ligand_info = []
+        for ligand_chain, ligand_chain_residues in ligand_residues.items():
+            for ligand_res_id, ligand_restype in ligand_chain_residues.items():
+                ligand_info.append((ligand_chain, str(ligand_res_id), ligand_restype))
+    else:
+        ligand_chain, ligand_res_id = ligand_residues
+        ligand_info = [(ligand_chain, str(ligand_res_id), pocket_restype)]
+        assert pocket_restype is not None
+    binder_info = []
+    for chain, positions in design_positions.items():
+        binder_info += list((chain, str(pos)) for pos in positions)
+    coupling_info = []
+    descriptor = ComplexDescriptor(ligand_info, binder_info, coupling_info)
+
+    return scaffold, descriptor
+
+
+def graft_pocket_onto_scaffold(pocket: Pocket, scaffold_name: str, ligand_residue: Tuple[str, Union[str, int]],
+                               design_positions: Dict[str, List[Union[str, int]]], output_name=None) -> Structure:
+    """
+    Will graft the residues of pocket onto the pdb structure found at scaffold_name.
+    The grafting is applied based on the ligand residue position and the design_positions (where mutations are
+    permitted).
+
+    :param pocket: a Pocket object containing at least one member per cluster
+    :param scaffold_name: the path to a pdb structure including the chain ids and res ids given in ligand_residue
+    and design_positions.
+    :param ligand_residue: A tuple of chain id, residue id (str or int) and desired residue type.
+    :param design_positions: A dictionary with the keys being the chain ids and the values being a list of all residue
+    ids that should be allowed to be mutated while grafting.
+    :param output_name: If given this will be the path of the newly designed pdb structure
+    :return: The newly designed Bio.PDB structure
+    """
+    scaffold, descriptor = prepare_scaffold_and_descriptor_for_grafting(scaffold_name=scaffold_name,
+                                                                        ligand_residues=ligand_residue,
+                                                                        design_positions=design_positions,
+                                                                        pocket_restype=pocket.restype)
+
+    graft, design = get_mutations_single_p_graft(pocket, scaffold, descriptor, res_id=int(ligand_residue[1]))
+    if output_name is not None:
+        io = PDBIO()
+        io.set_structure(design)
+        io.save(output_name)
+
+    return design
+
+
+def graft_best_pocket_onto_scaffold(pockets: Dict[str, List[Pocket]], scaffold_name: str,
+                                    ligand_residues: Dict[str, Dict[Union[str, int], str]],
+                                    design_positions: Dict[str, List[Union[str, int]]], output_name=None,
+                                    penalty_threshold: float = 32.0, distance_factor: float = 2.0,
+                                    orient_factor: float = 1.0, secor_factor: float = 1.0, ):
+    """
+    Will graft the residues of the best matching pocket in pockets onto the pdb structure found at scaffold_name.
+    The grafting is applied based on the ligand residue positions and the design_positions (where mutations are
+    permitted) and based on the defined ligand residue types.
+
+    :param pockets: a collection of Pockets (result of the pocket miner) containing at least one member per cluster
+    and at least one pocket where the restype is the ligand_restype.
+    :param scaffold_name: the path to a pdb structure including the the chain ids and res ids given in ligand_residue
+    and design_positions.
+    :param ligand_residues: A dict of chain id matched with a dict of residue id (str or int) and desired residue type.
+    :param design_positions: A dictionary with the keys being the chain ids and the values being a list of all residue
+    ids that should be allowed to be mutated while grafting.
+    :param output_name: If given this will be the path of the newly designed pdb structure
+    :param penalty_threshold: see get_optimal_pocket_graft
+    :param distance_factor: see calculate_penalty
+    :param orient_factor: see calculate_penalty
+    :param secor_factor: see calculate_penalty
+    :return: A tuple containing the newly designed Bio.PDB structure and the BinderGraft applied
+    """
+    scaffold, descriptor = prepare_scaffold_and_descriptor_for_grafting(scaffold_name=scaffold_name,
+                                                                        ligand_residues=ligand_residues,
+                                                                        design_positions=design_positions)
+
+    graft, design = simple_graft(scaffold=scaffold, descriptor=descriptor, pockets=pockets,
+                                 penalty_threshold=penalty_threshold, distance_factor=distance_factor,
+                                 orient_factor=orient_factor, secor_factor=secor_factor)
+    if output_name is not None:
+        io = PDBIO()
+        io.set_structure(design)
+        io.save(output_name)
+
+    return design, graft
+
+
+def multi_graft_best_pocket_onto_scaffold(pockets: Dict[str, List[Pocket]], scaffold_name: str,
+                                          ligand_residues: Dict[str, Dict[Union[str, int], str]],
+                                          design_positions: Dict[str, List[Union[str, int]]], output_name=None,
+                                          penalty_threshold: float = 32.0, distance_factor: float = 2.0,
+                                          orient_factor: float = 1.0, secor_factor: float = 1.0,
+                                          n_solutions: int = 10):
+    """
+    Does the same thing as graft_best_pocket_onto_scaffold, but returns the best n_solutions solutions of grafting:
+
+    Will graft the residues of the best matching pocket in pockets onto the pdb structure found at scaffold_name.
+    The grafting is applied based on the ligand residue positions and the design_positions (where mutations are
+    permitted) and based on the defined ligand residue types.
+
+    :param pockets: a collection of Pockets (result of the pocket miner) containing at least one member per cluster
+    and at least one pocket where the restype is the ligand_restype.
+    :param scaffold_name: the path to a pdb structure including the the chain ids and res ids given in ligand_residue
+    and design_positions.
+    :param ligand_residues: A dict of chain id matched with a dict of residue id (str or int) and desired residue type.
+    :param design_positions: A dictionary with the keys being the chain ids and the values being a list of all residue
+    ids that should be allowed to be mutated while grafting.
+    :param output_name: If given this will be the path of the newly designed pdb structures with added numbers for
+    the n_th solution.
+    :param penalty_threshold: see get_optimal_pocket_graft
+    :param distance_factor: see calculate_penalty
+    :param orient_factor: see calculate_penalty
+    :param secor_factor: see calculate_penalty
+    :param n_solutions: maximum number of solutions to generate
+    :return: A list containing: penalty, BinderGraft and designed Bio.PDB structures (sorted best to worst).
+    """
+    scaffold, descriptor = prepare_scaffold_and_descriptor_for_grafting(scaffold_name=scaffold_name,
+                                                                        ligand_residues=ligand_residues,
+                                                                        design_positions=design_positions)
+
+    result = multi_graft(scaffold=scaffold, descriptor=descriptor, pockets=pockets,
+                         penalty_threshold=penalty_threshold, distance_factor=distance_factor,
+                         orient_factor=orient_factor, secor_factor=secor_factor, n_solutions=n_solutions)
+
+    if output_name is not None:
+        if not output_name.endswith(".pdb"):
+            output_name = output_name + ".pdb"
+        for number, result_n in enumerate(result):
+            design = result_n[2]
+            io = PDBIO()
+            io.set_structure(design)
+            io.save(output_name.replace(".pdb", str(number + 1) + ".pdb"))
+
+    return result

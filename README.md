@@ -77,7 +77,7 @@ or for single PDB files:
 ```python
 from atligator.pdb_util import get_pdb_structure
 
-get_pdb_structure("2GDN", dest_dir="./structures/")
+get_pdb_structure("1z5s", dest_dir="./strucures/")
 ```
 
 #### Preprocessing Structures
@@ -341,4 +341,95 @@ any_member = tyr_pocket.clusters[0].members[0]
 
 # Let's visualize this single pocket with plotly
 visualize_single_pocket(pocket=tyr_pocket, datapoint=most_representative_member)
+```
+
+
+## Pocket Grafting
+
+To apply the knowledge gained by ATLIGATOR atlas and pockets directly to your design pockets
+can be grafted onto new scaffolds.
+
+**Note**: All grafted pockets will be based on natural pockets from the input structures and the side chain
+conformations (rotamers) will remain as they were in the original structure. Thus, the grafted rotamers will **not**
+perfectly fit into the new environment. It is highly recommended to minimize these rotamers with a common protocol
+(e.g. Rosetta fixbb).
+
+### Grafting One Binding Pocket
+
+Individual pockets can be grafted onto scaffold proteins directly. Just define a protein of choice, mutable binder 
+residue positions, a ligand residue (the basis for the grafted pocket) and the pocket you want to graft.
+ATLIGATOR will automatically pick the best matching members of this pocket and the best fitting positions to mutate.
+
+```python
+from atligator.grafting import graft_pocket_onto_scaffold
+
+# First define which positions in which chain are mutable
+design_positions = {"C": ["510", "513", "514", "515", "517", "518", "523", "524", "557", "558", "559", "561", "562"]}
+# Pick a pocket of the desired residue type and graft it onto design positions of scaffold - based on ligand_residue
+# If you define an output_name, the new pdb file will be stored at this path.
+graft_pocket_onto_scaffold(pocket=pockets["THR"][1], scaffold_name="./1z5s.pdb", ligand_residue=("A", "131"), 
+                           design_positions=design_positions, output_name="./design.pdb")
+```
+
+### Quickgraft
+#### Quickgraft - single pocket
+
+Quickgraft allows to graft the pocket in a pocket collection which fits the best on the available design positions.
+In this case you don't have to select the pocket yourself, but the residue type the ligand 
+residue should be mutated to.
+
+```python
+from atligator.grafting import graft_best_pocket_onto_scaffold
+
+# First define which positions in which chain are mutable
+design_positions = {"C": ["510", "513", "514", "517", "523", "558", "559"]}
+# Define which residue (from which chain) should act as a ligand residue and which mutation should be applied.
+ligand_residues = {"A": {"131": "THR"}}
+# Graft the best matching pocket onto design_positions of scaffold - based on ligand_residues and the new ligand restype
+# If you define an output_name, the new pdb file will be stored at this path.
+design, graft = graft_best_pocket_onto_scaffold(pockets=pockets, scaffold_name="./1z5s.pdb", 
+                                                ligand_residues=ligand_residues, 
+                                                design_positions=design_positions, output_name="./design.pdb")
+print(graft)
+```
+
+#### Quickgraft - multi pocket
+
+If you want to mutate more than one ligand residue and want to get matching pocket grafts for all ligand mutations 
+ATLIGATOR offers a multi pocket grafting option.
+
+```python
+from atligator.grafting import graft_best_pocket_onto_scaffold
+
+# First define which positions in which chain are mutable
+design_positions = {"C": ["510", "513", "514", "517", "523", "558", "559"]}
+# Define which residues (from which chain) should act as ligand residues and which mutations should be applied.
+ligand_residues = {"A": {"131": "THR", "132": "ASN"}}
+# Graft the best matching pocket onto design_positions of scaffold - based on ligand_residue and the new ligand_restype
+# If you define an output_name, the new pdb file will be stored at this path.
+design, graft = graft_best_pocket_onto_scaffold(pockets=pockets, scaffold_name="./1z5s.pdb", 
+                                                ligand_residues=ligand_residues, 
+                                                design_positions=design_positions, output_name="./design.pdb")
+print(graft)
+```
+
+#### Quickgraft - more grafting solutions
+
+If you want multiple grafts based on your settings use:
+
+```python
+from atligator.grafting import multi_graft_best_pocket_onto_scaffold
+
+# First define ligand residues and design positions as before
+design_positions = {"C": ["510", "513", "514", "517", "523", "558", "559"]}
+ligand_residues = {"A": {"131": "THR", "132": "ASN"}}
+
+# In this case the ouput_name will not be taken as is, but extended with an index (starting from 1) for each 
+# grafting result: ./design1.pdb ./design2.pdb ./design3.pdb ...
+result = multi_graft_best_pocket_onto_scaffold(pockets=pockets, scaffold_name="./1z5s.pdb", 
+                                               ligand_residues=ligand_residues, design_positions=design_positions, 
+                                               output_name="./design.pdb", n_solutions=5)
+# You can inspect the results:
+for res_i, (penalty, graft, design) in enumerate(result):
+    print(f"Result {res_i} with penalty of {penalty} includes the following grafted mutations:\n{graft}")
 ```
