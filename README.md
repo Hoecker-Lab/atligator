@@ -2,29 +2,40 @@
 
 ATLIGATOR is created to analyse protein-protein or protein-peptide interactions.
 
-# Installation Notes
+# Installation
 
 You can find the atligator in the Python Packaging Index.
 Thus, to install atligator in your python 3.7+ environment just type:
 
 ```pip install atligator```
 
-#### Notes
-For the compilation of scipy and numpy you might need to install the compilers first 
-(or try to use only wheel files, see below! This might depend on your OS environment):
-```
-sudo apt-get install gfortran libopenblas-dev liblapack-dev
-```
-Additionally, if installation fails because of the build process of dependencies use the '--only-binary=:all:' flag:
+#### Installation Notes
+If installation fails because of the build process of dependencies use the '--only-binary=:all:' flag:
 ```
 python -m pip install --only-binary=:all: atligator
 ```
+
+For the compilation of scipy and numpy you might need to install the compilers first 
+(or try to use only wheel files, see above! This might depend on your OS environment):
+```
+sudo apt-get install gfortran libopenblas-dev liblapack-dev
+```
+
+#### What is included?
+
+The package from PyPI delivers all options to work with ATLIGATOR as a python API.
+The CLI scripts can be received from github as an aditional entry point. 
 
 # Usage
 
 You can use ATLIGATOR either with the predefined scripts or the API. 
 Most use cases can be accessed via both options.
 Note: Most scripts will also give you a help option using the `-h` flag.
+
+### Citation
+
+If you use ATLIGATOR please cite it. The article is currently being published, so stay tuned
+for the correct citation.
 
 ### Why?
 
@@ -367,8 +378,8 @@ from atligator.grafting import graft_pocket_onto_scaffold
 design_positions = {"C": ["510", "513", "514", "515", "517", "518", "523", "524", "557", "558", "559", "561", "562"]}
 # Pick a pocket of the desired residue type and graft it onto design positions of scaffold - based on ligand_residue
 # If you define an output_name, the new pdb file will be stored at this path.
-graft_pocket_onto_scaffold(pocket=pockets["THR"][1], scaffold_name="./1z5s.pdb", ligand_residue=("A", "131"), 
-                           design_positions=design_positions, output_name="./design.pdb")
+design = graft_pocket_onto_scaffold(pocket=pockets["THR"][1], scaffold_name="./1z5s.pdb", ligand_residue=("A", "131"), 
+                                    design_positions=design_positions, output_name="./design.pdb")
 ```
 
 ### Quickgraft
@@ -433,3 +444,18 @@ result = multi_graft_best_pocket_onto_scaffold(pockets=pockets, scaffold_name=".
 for res_i, (penalty, graft, design) in enumerate(result):
     print(f"Result {res_i} with penalty of {penalty} includes the following grafted mutations:\n{graft}")
 ```
+
+# Acknowledgments
+
+This tool is the work of the Protein Design group of Prof. Dr. Birte Höcker at University of Bayreuth.
+We thankfully use software packages to enable ATLIGATOR functionality.
+This is a non-exhaustive list of requirements:
+- biopython
+- numpy
+- plotly
+- matplotlib
+- scipy
+- pandas
+- tqdm
+
+This work was enabled by the European Research Council (H2020-FETOpen-RIA grant 764434 'Pre-ART').

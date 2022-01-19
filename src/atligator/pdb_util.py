@@ -522,53 +522,6 @@ def mutate_residue(residue: Residue, restype: str) -> None:
     residue.resname = restype
 
 
-def cut_termini(structure: Structure, chain_id: str = "A", chain_id_lig: str = "D",
-                cut_off_binder: Tuple[int, int] = (52, 250), cut_off_ligand: Tuple[int, int] = (2, 9),
-                rep_size: int = 42, delete_only: bool = False) -> None:
-    """
-    Trying to shorten an armadillo structure by cutting terminal repeat units. 5AEI = 42 res per unit.
-    -> 7 units - 2 = 5 units. Starting with 11 - 291 shortened to 53 - 249. Ligand shortend from 1-10 to 3-8.
-    To consider: terminal parts don't share same sequence.
-    -> To go: copy aa sequence from 11-52 to 53-94 and from 250-291 to 208-249
-              delete 11-52 and 250-291 and lig 1, 2, 9, 10.
-    :param structure:
-    :param chain_id:
-    :param chain_id_lig:
-    :param cut_off_binder:
-    :param cut_off_ligand:
-    :param rep_size:
-    :param delete_only:
-    :return: None
-    """
-    lower_end = cut_off_binder[0]
-    upper_end = cut_off_binder[1]
-    assert lower_end <= upper_end
-    if not delete_only:
-        for residue in structure[0][chain_id]:
-            res_id: int = residue.get_id()[1]
-            if res_id <= lower_end:
-                mutate_residue(structure[0][chain_id][res_id + rep_size], residue.get_resname())
-            elif res_id >= upper_end:
-                mutate_residue(structure[0][chain_id][res_id - rep_size], residue.get_resname())
-    to_remove = []
-    for residue in structure[0][chain_id]:
-        res_id: int = residue.get_id()[1]
-        if res_id <= lower_end or res_id >= upper_end:
-            to_remove.append(residue)
-    for i in to_remove:
-        structure[0][chain_id].detach_child(i.get_id())
-    lower_end = cut_off_ligand[0]
-    upper_end = cut_off_ligand[1]
-    assert lower_end <= upper_end
-    to_remove = []
-    for residue in structure[0][chain_id_lig]:
-        res_id: int = residue.get_id()[1]
-        if res_id <= lower_end or res_id >= upper_end:
-            to_remove.append(residue)
-    for i in to_remove:
-        structure[0][chain_id_lig].detach_child(i.get_id())
-
-
 def replace_restypes(structure_file: str, old_type: str, new_type: str) -> None:
     """Replaces old_type residues with new_type residues everywhere in the provided PDB structure
     :param structure_file: PDB filename
@@ -928,10 +881,15 @@ def get_pdb_structure(pdb_key: str, dest_dir: str, local: bool = False, pdb_db_p
     :return: the file name, if copying was successful
     """
 
+    pdb_key = pdb_key.lower()
+
     def return_remote():
-        return PDBList().retrieve_pdb_file(pdb_key,
-                                           pdir=dest_dir,
-                                           file_format="pdb")
+        dl_file = PDBList().retrieve_pdb_file(pdb_key,
+                                              pdir=dest_dir,
+                                              file_format="pdb")
+        dl_path = Path(dl_file)
+        dl_path.rename(pdb_key + ".pdb")
+        return str(dl_path)
 
     if not local or pdb_db_path is None:
         pdb_path = return_remote()

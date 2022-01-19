@@ -5,5 +5,6 @@
 :date: 2018-03-05
 """
 
-__all__ = ["acomplex", "atlas", "base_scorer", "genetic_mutator", "geometry", "io_util", "mutation", "pdb_util",
-           "pocket_miner", "prediction_matrix", "rosetta_util", "structure", "visualization"]
+__all__ = ["acomplex", "atlas", "base_scorer", "deep_atlas", "genetic_mutator", "geometry", "grafting", "html_util",
+           "io_util", "mutation", "osprey_util", "pdb_util", "pocket_miner", "prediction_matrix", "rosetta_util",
+           "similarity_scoring", "structure", "ui_util", "visualization"]
