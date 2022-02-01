@@ -260,6 +260,43 @@ visualize_atlas(atlas, method="plotly", ligand_restype="ALA")
 visualize_atlas(atlas, method="plotly", ligand_restype="ALA", binder_restype="TYR")
 ```
 
+### File transfer
+
+#### Not recommended for data exchange: pickle
+Atlases can be stored with pickle (https://docs.python.org/3/library/pickle.html) by deserialisation of the atlas
+python object: 
+
+```python
+import pickle
+# for import
+with open("./atlas.atlas", "rb") as rf:
+    atlas = pickle.load(rf)
+
+# for export
+with open("./atlas.atlas", "wb") as wf:
+    pickle.dump(atlas, wf)
+```
+
+However, in any environment where files are exchanged with others it's not recommended to use pickle. Pickle files
+can contain any python code and are executed after reading in the file. Thus, untrusted sources could hide an unpleasant
+surprise in their files and we need an alternative.
+
+#### json Atlases 
+
+We have the option to import and export Atlases as json files which are parsed internally. By doing so, we have clear 
+text files for immediate inspection and prevent undesired code execution.
+
+```python
+from atligator import atlas
+# for import
+with open("./atlas.json", "r") as rf:
+    atlas = atlas.Atlas.from_json(rf)
+
+# for export
+with open("./atlas.json", "w") as wf:
+    atlas.to_json_file(wf)
+```
+
 ## Pockets
 
 ### Pocket Mining
@@ -352,6 +389,43 @@ any_member = tyr_pocket.clusters[0].members[0]
 
 # Let's visualize this single pocket with plotly
 visualize_single_pocket(pocket=tyr_pocket, datapoint=most_representative_member)
+```
+
+### File Transfer
+
+#### Not recommended for data exchange: pickle
+Pocket collections can be stored with pickle (https://docs.python.org/3/library/pickle.html) by deserialisation of the 
+python object: 
+
+```python
+import pickle
+# for import
+with open("./pockets.pockets", "rb") as rf:
+    pockets = pickle.load(rf)
+
+# for export
+with open("./pockets.pockets", "wb") as wf:
+    pickle.dump(pockets, wf)
+```
+
+However, in any environment where files are exchanged with others it's not recommended to use pickle. Pickle files
+can contain any python code and are executed after reading in the file. Thus, untrusted sources could hide an unpleasant
+surprise in their files and we need an alternative.
+
+#### json Pocket Collections
+
+We have the option to import and export Pocket Collections as json files which are parsed internally. By doing so, we 
+have clear text files for immediate inspection and prevent undesired code execution.
+
+```python
+from atligator import pocket_miner
+# for import
+with open("./pockets.json", "r") as rf:
+    pockets = pocket_miner.json_to_pockets(rf)
+
+# for export
+with open("./pockets.json", "w") as wf:
+    pocket_miner.pockets_to_json_file(pockets, wf)
 ```
 
 
