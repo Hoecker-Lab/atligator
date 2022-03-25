@@ -888,6 +888,8 @@ def get_pdb_structure(pdb_key: str, dest_dir: str, local: bool = False, pdb_db_p
                                               pdir=dest_dir,
                                               file_format="pdb")
         dl_path = Path(dl_file)
+        if not dl_path.exists():
+            return None
         dl_path.rename(pdb_key + ".pdb")
         return str(dl_path)
 
@@ -941,7 +943,7 @@ def download_pdbs_by_scop_query(query: str, dest_dir: str, scop_dir_cla_file: st
         logger.info(f"Found {len(pdbkeys)} matching pdb files.")
     for k in pdbkeys:
         out_file = get_pdb_structure(pdb_key=k, dest_dir=dest_dir, pdb_db_path=pdb_db_path, local=local_db)
-        if not os.path.isfile(out_file):
+        if out_file is None or not os.path.isfile(out_file):
             logging.warning(f"The file {out_file} cannot be found in the pdb database.")
         else:
             logger.info(f'Downloading {out_file} and renaming to '
