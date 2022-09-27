@@ -459,7 +459,7 @@ def check_pdbs_for_2s_content(pdbs: List, quiet: bool = True, check_if_amino_aci
 
 class SelectionProcess:
     """
-    Performs the ALARMS selection step for a set of (processed) pdb structures.
+    Performs the selection step for a set of (processed) pdb structures.
     """
 
     def __init__(self, pdbs: List[str], quiet: bool = True):

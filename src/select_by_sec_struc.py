@@ -17,7 +17,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from glob import iglob
 from typing import Union, List
 
-from alarms.construct_selection import SelectionProcess
+from atligator.construct_selection import SelectionProcess
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

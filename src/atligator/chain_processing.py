@@ -161,7 +161,7 @@ def process_pdb(pdb, max_distance, min_ligand_len, min_binder_len, output_path, 
 
 class MultiProcessChainProcessing:
     """
-    Performs the ALARMS processing step for a set of pdb structures.
+    Performs the processing step for a set of pdb structures.
     For multiprocessing it makes use of either
     - multiprocess() for processing without a progress bar
     or

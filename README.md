@@ -41,7 +41,7 @@ for the correct citation.
 
 Why you should use ATLIGATOR?
 
-#### Atlases & Alarms
+#### Atlases
 With ATLIGATOR you can build up interaction databases (called atlases) which store the interactions between pairs of
 amino acid residues. By combining many of these pairwise interactions you can get a better understanding of how amino 
 acids tend to interact with each other.
@@ -107,7 +107,7 @@ ligand (any other chain it interacts with).*
 or write a python script/use the interpreter:
 
 ```python
-from alarms.chain_processing import MultiProcessChainProcessing
+from atligator.chain_processing import MultiProcessChainProcessing
 from glob import iglob
 
 pdbs = [x for x in iglob("./structures/*.pdb")]
@@ -119,7 +119,7 @@ proc.main()
 To process single files: 
 
 ```python
-from alarms.chain_processing import process_pdb
+from atligator.chain_processing import process_pdb
 
 process_pdb(pdb="./structures/7ev7.pdb", output_path="./structures/processed/", min_binder_len=30, 
             min_ligand_len=3, max_distance=8.0, quiet=False)
@@ -145,7 +145,7 @@ only a text file 'filtered_objects.txt' including all selected residues.*
 Within python:
 
 ```python
-from alarms.construct_selection import SelectionProcess
+from atligator.construct_selection import SelectionProcess
 from glob import iglob
 
 pdbs = list(x for x in iglob("./structures/processed/*.pdb"))
@@ -162,7 +162,7 @@ print("These fall under the criteria:", filtered)
 Or to only retrieve the secondary structure content:
 
 ```python
-from alarms.construct_selection import check_pdbs_for_2s_content
+from atligator.construct_selection import check_pdbs_for_2s_content
 pdbs = list(x for x in iglob("./structures/processed/*.pdb"))
 check_pdbs_for_2s_content(pdbs=pdbs, quiet=False)
 ```

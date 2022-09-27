@@ -19,7 +19,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from glob import iglob
 from typing import Dict
 
-from alarms.chain_processing import MultiProcessChainProcessing
+from atligator.chain_processing import MultiProcessChainProcessing
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

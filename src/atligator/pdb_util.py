@@ -89,7 +89,7 @@ ABC = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
        "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
 
-# Conversion dictionaries for chain processing within ALARMS
+# Conversion dictionaries for chain processing within structure preprocessing
 chain_conv = dict(zip(ABC, range(len(ABC))))
 chain_inv_conv = dict(zip(range(len(ABC)), ABC))
 
